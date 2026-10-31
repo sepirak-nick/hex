@@ -17,7 +17,7 @@ fn autostart_dir() -> Result<PathBuf> {
 }
 
 fn entry_path() -> Result<PathBuf> {
-    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux_portal::APP_ID)))
+    Ok(autostart_dir()?.join(format!("{}.desktop", crate::linux::portal::APP_ID)))
 }
 
 /// Renames Hex's managed `hex.desktop` autostart entry, the name before
@@ -42,7 +42,7 @@ fn move_legacy_entry_in(directory: &Path) -> Result<()> {
     if !old.lines().any(|line| line.trim() == MANAGED_MARK) {
         return Ok(());
     }
-    let entry = directory.join(format!("{}.desktop", crate::linux_portal::APP_ID));
+    let entry = directory.join(format!("{}.desktop", crate::linux::portal::APP_ID));
     if fs::symlink_metadata(&entry).is_ok() {
         fs::remove_file(&legacy)
     } else {
@@ -149,7 +149,7 @@ fn write_atomically(path: &Path, contents: &str) -> Result<()> {
         .ok_or_else(|| eyre!("{} has no parent directory", path.display()))?;
     fs::create_dir_all(directory)
         .wrap_err_with(|| format!("could not create {}", directory.display()))?;
-    let staged = directory.join(format!(".{}.desktop.next", crate::linux_portal::APP_ID));
+    let staged = directory.join(format!(".{}.desktop.next", crate::linux::portal::APP_ID));
     let mut file = fs::File::create(&staged)
         .wrap_err_with(|| format!("could not write {}", staged.display()))?;
     file.write_all(contents.as_bytes())?;
