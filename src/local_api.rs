@@ -713,7 +713,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
             };
             let model = crate::transcription_models::definition(id);
-            if !model.available() {
+            if !offered_to_other_apps(model) {
                 return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
             }
             let Ok(selection) = installation_selection(model, &request.path) else {
@@ -965,8 +965,21 @@ fn validate_selection(
         language,
         recognition_hints: String::new(),
     };
-    crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
+    let definition =
+        crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
+    if !offered_to_other_apps(definition) {
+        return Err("unsupported-model");
+    }
     Ok(selection)
+}
+
+/// Other apps' audio stays on this Mac, so they never see a cloud model.
+fn offered_to_other_apps(model: &crate::transcription_models::ModelDefinition) -> bool {
+    model.available()
+        && !matches!(
+            model.runtime,
+            crate::transcription_models::ModelRuntime::ElevenLabs { .. }
+        )
 }
 
 #[derive(Default)]
@@ -1184,7 +1197,7 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
     }
     Ok(crate::transcription_models::MODELS
         .iter()
-        .filter(|model| model.available())
+        .filter(|model| offered_to_other_apps(model))
         .map(|model| {
             let managed = matches!(
                 model.runtime,
@@ -2394,6 +2407,31 @@ mod tests {
                 .contains(&endpoint.token)
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn other_apps_never_see_or_reach_the_cloud_model() {
+        crate::labs::with_elevenlabs(true, || {
+            let scribe = crate::transcription_models::definition(
+                crate::transcription_models::TranscriptionModelId::ElevenLabsScribeV2,
+            );
+            assert_eq!(scribe.available(), cfg!(target_os = "macos"));
+            assert!(!offered_to_other_apps(scribe));
+            assert_eq!(
+                transcription_selection("/transcriptions?model=elevenlabs_scribe_v2&language=en"),
+                Err("unsupported-model")
+            );
+            assert!(
+                installation_selection(scribe, "/models/elevenlabs_scribe_v2/prepare?language=en")
+                    .is_err()
+            );
+            assert!(
+                model_infos("/models?language=en")
+                    .unwrap()
+                    .iter()
+                    .all(|model| model.id != "elevenlabs_scribe_v2")
+            );
+        });
     }
 
     #[test]

@@ -677,7 +677,8 @@ impl Transcriber for HexTranscriber {
             crate::dictation::try_resample_for_parakeet(&audio.samples, audio.sample_rate)
                 .map_err(|error| anyhow::anyhow!(error))?
         };
-        let (_, selection) = crate::app_settings::transcription_selection();
+        // Captures stay on this Mac whatever dictation uses.
+        let selection = crate::app_settings::local_transcription_selection();
         let (text, words) = transcribe_words(engine, &selection, samples)
             .map_err(|error| anyhow::anyhow!("{error:#}"))?;
         Ok(Some(TranscriptData {

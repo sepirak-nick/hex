@@ -731,9 +731,10 @@ impl ChunkModel {
             self.owned = None;
             return result;
         }
-        // In the app, follow dictation's current choice, such as Apple Speech.
+        // In the app, follow dictation's current local choice. A meeting never
+        // follows it to a cloud model.
         let selection = if engine.is_some() {
-            crate::app_settings::transcription_selection().1
+            crate::app_settings::local_transcription_selection()
         } else {
             self.selection.clone()
         };
@@ -1902,7 +1903,7 @@ pub(super) fn echo_report(
     let mut envelope = EchoEnvelope::default();
     let mut report = String::new();
     let mut model = None;
-    let selection = transcribe.then(|| crate::app_settings::transcription_selection().1);
+    let selection = transcribe.then(crate::app_settings::local_transcription_selection);
     let mut old_entries = Vec::new();
     let mut new_entries = Vec::new();
     for (source, origin_ms, path) in &sources {

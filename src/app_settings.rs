@@ -56,6 +56,9 @@ static CAPSULE_FLOW: AtomicU8 = AtomicU8::new(0);
 struct RuntimeTranscriptionSelection {
     revision: u64,
     selection: TranscriptionSelection,
+    /// What audio that must stay on this Mac runs on: `selection`, or the
+    /// last local model while `selection` is a cloud model.
+    local: TranscriptionSelection,
 }
 
 #[derive(Default)]
@@ -2276,7 +2279,7 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.runtime_hotkeys();
-        set_transcription_selection(&self.transcription);
+        set_transcription_selection(&self.transcription, self.local_transcription());
         set_microphone_selection(self.microphone.as_deref());
         #[cfg(target_os = "macos")]
         crate::config::update_dictation_profiles(&self.dictation_processing);
@@ -2445,6 +2448,16 @@ impl AppSettings {
             "left a cloud transcription model whose Labs switch is off"
         );
         self.transcription = self.last_local_transcription();
+    }
+
+    /// The selection audio that must stay on this Mac runs on.
+    fn local_transcription(&self) -> TranscriptionSelection {
+        match crate::transcription_models::definition(self.transcription.model).runtime {
+            crate::transcription_models::ModelRuntime::ElevenLabs { .. } => {
+                self.last_local_transcription()
+            }
+            _ => self.transcription.clone(),
+        }
     }
 
     /// The most recent local model, preferring one still downloaded.
@@ -2674,9 +2687,10 @@ pub fn microphone_selection() -> (u64, Option<String>) {
     (state.revision, state.device.clone())
 }
 
-fn set_transcription_selection(selection: &TranscriptionSelection) {
+fn set_transcription_selection(selection: &TranscriptionSelection, local: TranscriptionSelection) {
     let state = TRANSCRIPTION_SELECTION.get_or_init(Default::default);
     let mut state = state.write().unwrap_or_else(|error| error.into_inner());
+    state.local = local;
     if state.selection != *selection {
         state.revision = state.revision.wrapping_add(1);
         state.selection = selection.clone();
@@ -2687,6 +2701,15 @@ pub fn transcription_selection() -> (u64, TranscriptionSelection) {
     let state = TRANSCRIPTION_SELECTION.get_or_init(Default::default);
     let state = state.read().unwrap_or_else(|error| error.into_inner());
     (state.revision, state.selection.clone())
+}
+
+/// The model for audio that must never leave this Mac: meetings, Annotate,
+/// and other apps' dictations. Only press-to-paste dictation follows
+/// [`transcription_selection`] to a cloud model.
+pub fn local_transcription_selection() -> TranscriptionSelection {
+    let state = TRANSCRIPTION_SELECTION.get_or_init(Default::default);
+    let state = state.read().unwrap_or_else(|error| error.into_inner());
+    state.local.clone()
 }
 
 pub fn recording_duck_volume() -> f32 {
@@ -4026,6 +4049,28 @@ mod tests {
             loaded.transcription,
             local(TranscriptionModelId::WhisperLargeV3Turbo, "de")
         );
+    }
+
+    #[test]
+    fn audio_that_stays_local_never_follows_the_selection_to_the_cloud() {
+        crate::labs::with_elevenlabs(true, || {
+            let settings = on_the_cloud_model(true);
+            assert_eq!(
+                settings.local_transcription(),
+                local(TranscriptionModelId::WhisperLargeV3Turbo, "de")
+            );
+            let mut settings = settings;
+            settings.transcription_recents.clear();
+            assert_eq!(
+                settings.local_transcription(),
+                TranscriptionSelection::default()
+            );
+            settings.transcription = local(TranscriptionModelId::ParakeetV2, "en");
+            assert_eq!(
+                settings.local_transcription(),
+                local(TranscriptionModelId::ParakeetV2, "en")
+            );
+        });
     }
 
     #[test]

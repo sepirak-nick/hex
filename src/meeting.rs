@@ -367,7 +367,7 @@ pub fn record(
     shutdown: &AtomicBool,
     updates: Option<SyncSender<RecordingUpdate>>,
 ) -> Result<MeetingManifest> {
-    let (_, transcription_selection) = crate::app_settings::transcription_selection();
+    let transcription_selection = crate::app_settings::local_transcription_selection();
     let transcription_model = crate::transcription_models::validate(&transcription_selection)?;
     if !crate::transcription_models::is_installed(
         transcription_model,
@@ -887,7 +887,7 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     if !pending.exists() {
         return Ok(None);
     }
-    let (_, selection) = crate::app_settings::transcription_selection();
+    let selection = crate::app_settings::local_transcription_selection();
     let model = crate::transcription_models::validate(&selection)?;
     if !crate::transcription_models::is_installed(model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
@@ -1159,7 +1159,7 @@ fn rename_meeting(directory: &Path, title: &str) -> Result<MeetingManifest> {
 /// and publishes its final transcript and Markdown copy.
 #[cfg(debug_assertions)]
 pub fn transcribe_meeting(id: &str) -> Result<MeetingManifest> {
-    let (_, selection) = crate::app_settings::transcription_selection();
+    let selection = crate::app_settings::local_transcription_selection();
     let model = crate::transcription_models::validate(&selection)?;
     if !crate::transcription_models::is_installed(model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
