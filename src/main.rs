@@ -143,22 +143,6 @@ mod vocabulary;
 mod voice_filter;
 #[cfg(target_os = "windows")]
 mod windows;
-#[cfg(target_os = "windows")]
-mod windows_app;
-#[cfg(target_os = "windows")]
-mod windows_audio_control;
-#[cfg(target_os = "windows")]
-mod windows_context;
-#[cfg(target_os = "windows")]
-mod windows_dictation;
-#[cfg(target_os = "windows")]
-mod windows_input;
-#[cfg(target_os = "windows")]
-mod windows_login_item;
-#[cfg(target_os = "windows")]
-mod windows_paste;
-#[cfg(target_os = "windows")]
-mod windows_rune;
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
