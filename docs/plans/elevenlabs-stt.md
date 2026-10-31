@@ -223,4 +223,10 @@ curl --silent --show-error --proto =https --connect-timeout 5 --max-time <n> \
 The task order and the estimate (about 23 hours) are unchanged.
 
 ## Status
-Planned only. The plan was drafted on another machine, which had no Rust toolchain, so nothing in it has been compiled or run. Task 1 verifies the toolchain, curl and the curl command by hand on the Mac. This Mac has curl 8.7.1, which meets the 8.3 minimum for `--variable` and `--expand-header`.
+Built and installed on this Mac. See [the feature map](../features/elevenlabs.md) for current behavior. Changes from this plan:
+
+- **Build:** Command Line Tools instead of Xcode, so the FoundationModels bridge is disabled (no Apple Intelligence in Meetings) and `build-app.sh` reuses an installed Hex's icon. Linking needs `LIBRARY_PATH=/Library/Developer/CommandLineTools/usr/lib/swift/macosx`.
+- **Install:** `HEX_RELEASE_UNSIGNED=1 HEX_LOCAL_BUILD=1 scripts/build-app.sh`, ad-hoc signed, updates off.
+- **`/streams`:** needed no change; it already answers 503 while the cloud model is the engine's.
+- **WAV stays:** raw PCM showed no gain.
+- **Unverified:** goldens (Linux only), and a meeting or Annotate capture with the cloud model selected, watched with `nettop`.

@@ -93,16 +93,26 @@ url_scheme=hex
 plutil -replace NSCameraUsageDescription -string "Hex mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
 rm -rf "$icon_output"
 mkdir -p "$icon_output"
-xcrun actool "$root/app/AppIcon.icon" \
-  --compile "$icon_output" \
-  --platform macosx \
-  --minimum-deployment-target 15.0 \
-  --app-icon AppIcon \
-  --standalone-icon-behavior all \
-  --output-partial-info-plist "$icon_info" \
-  --output-format human-readable-text \
-  --warnings \
-  --notices >&2
+if xcrun --find actool >/dev/null 2>&1; then
+  xcrun actool "$root/app/AppIcon.icon" \
+    --compile "$icon_output" \
+    --platform macosx \
+    --minimum-deployment-target 15.0 \
+    --app-icon AppIcon \
+    --standalone-icon-behavior all \
+    --output-partial-info-plist "$icon_info" \
+    --output-format human-readable-text \
+    --warnings \
+    --notices >&2
+else
+  # Command Line Tools have no actool: reuse an installed Hex's compiled icon.
+  icon_source=${HEX_ICON_SOURCE:-/Applications/Hex.app/Contents/Resources}
+  if [ ! -f "$icon_source/AppIcon.icns" ] || [ ! -f "$icon_source/Assets.car" ]; then
+    echo "No actool, and no compiled icon in $icon_source. Install Xcode or set HEX_ICON_SOURCE." >&2
+    exit 1
+  fi
+  cp "$icon_source/AppIcon.icns" "$icon_source/Assets.car" "$icon_output/"
+fi
 cp "$icon_output/AppIcon.icns" "$icon_output/Assets.car" "$bundle/Contents/Resources/"
 
 sign "$bundle/Contents/Library/HexMicrophone.driver"
