@@ -1,4 +1,4 @@
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
 
 use crate::apple_speech::AppleSpeech;
 use crate::parakeet::Parakeet;
@@ -31,6 +31,9 @@ impl Transcriber {
                 .map(Box::new)
                 .map(Self::Gguf),
             ModelRuntime::AppleSpeech => AppleSpeech::load(selection).map(Self::AppleSpeech),
+            ModelRuntime::ElevenLabs { .. } => Err(eyre!(
+                "ElevenLabs transcription isn't available in this build yet"
+            )),
         }
     }
 
@@ -177,6 +180,19 @@ impl WarmTranscriber {
 mod tests {
     use super::{Transcript, UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES, prepare_gguf_samples};
     use crate::transcription_models::TranscriptionModelId;
+
+    #[test]
+    fn the_cloud_model_does_not_load_until_it_has_an_upload_path() {
+        let selection = crate::transcription_models::TranscriptionSelection {
+            model: TranscriptionModelId::ElevenLabsScribeV2,
+            language: "en".into(),
+            recognition_hints: String::new(),
+        };
+        assert!(super::Transcriber::load_selection(&selection).is_err());
+        crate::labs::with_elevenlabs(true, || {
+            assert!(super::Transcriber::load_selection(&selection).is_err());
+        });
+    }
 
     #[test]
     fn apple_bridge_transcript_uses_the_canonical_wire_shape() {

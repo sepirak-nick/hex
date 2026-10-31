@@ -760,6 +760,8 @@ fn transcription_action(
         crate::transcription_models::ModelRuntime::AppleSpeech => {
             crate::transcription_models::is_installed(model, &selection.language)
         }
+        // Other apps' audio never goes to the cloud.
+        crate::transcription_models::ModelRuntime::ElevenLabs { .. } => false,
     };
     if !prepared {
         return RequestAction::Respond(HttpResponse::code(409, "model-not-ready"));

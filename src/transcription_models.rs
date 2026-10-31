@@ -32,6 +32,8 @@ pub enum TranscriptionModelId {
     #[serde(rename = "underdog_bark_3_clean")]
     UnderdogBark3Clean,
     AppleSpeech,
+    #[serde(rename = "elevenlabs_scribe_v2")]
+    ElevenLabsScribeV2,
 }
 
 impl TranscriptionModelId {
@@ -48,6 +50,7 @@ impl TranscriptionModelId {
             Self::UnderdogBark3Pro => "underdog_bark_3_pro",
             Self::UnderdogBark3Clean => "underdog_bark_3_clean",
             Self::AppleSpeech => "apple_speech",
+            Self::ElevenLabsScribeV2 => "elevenlabs_scribe_v2",
         }
     }
 }
@@ -68,6 +71,7 @@ impl FromStr for TranscriptionModelId {
             "underdog_bark_3_pro" => Ok(Self::UnderdogBark3Pro),
             "underdog_bark_3_clean" => Ok(Self::UnderdogBark3Clean),
             "apple_speech" => Ok(Self::AppleSpeech),
+            "elevenlabs_scribe_v2" => Ok(Self::ElevenLabsScribeV2),
             _ => Err(eyre!("unknown transcription model: {value}")),
         }
     }
@@ -171,6 +175,13 @@ pub struct ModelDefinition {
 pub enum ModelRuntime {
     Gguf(&'static GgufArtifact),
     AppleSpeech,
+    /// A cloud model: dictation audio goes to ElevenLabs. `model_id` is the
+    /// API's name for it.
+    ElevenLabs {
+        // Read once the upload path exists.
+        #[allow(dead_code)]
+        model_id: &'static str,
+    },
 }
 
 pub struct GgufArtifact {
@@ -193,8 +204,14 @@ impl GgufArtifact {
 }
 
 impl ModelDefinition {
-    pub const fn available(&self) -> bool {
-        !matches!(self.runtime, ModelRuntime::AppleSpeech)
+    pub fn available(&self) -> bool {
+        match self.runtime {
+            ModelRuntime::Gguf(_) => true,
+            ModelRuntime::AppleSpeech => false,
+            ModelRuntime::ElevenLabs { .. } => {
+                cfg!(target_os = "macos") && crate::labs::elevenlabs()
+            }
+        }
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -264,6 +281,7 @@ impl ModelDefinition {
     pub fn size_label(&self) -> String {
         match self.runtime {
             ModelRuntime::AppleSpeech => "Managed".into(),
+            ModelRuntime::ElevenLabs { .. } => "Cloud".into(),
             ModelRuntime::Gguf(artifact) if artifact.bytes >= 1_000_000_000 => {
                 format!("{:.1} GB", artifact.bytes as f64 / 1_000_000_000.0)
             }
@@ -282,7 +300,7 @@ impl ModelDefinition {
     pub const fn download_bytes(&self) -> Option<u64> {
         match self.runtime {
             ModelRuntime::Gguf(artifact) => Some(artifact.bytes),
-            ModelRuntime::AppleSpeech => None,
+            ModelRuntime::AppleSpeech | ModelRuntime::ElevenLabs { .. } => None,
         }
     }
 }
@@ -586,6 +604,23 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_language_detection: false,
         supports_recognition_hints: false,
     },
+    ModelDefinition {
+        id: TranscriptionModelId::ElevenLabsScribeV2,
+        name: "ElevenLabs Scribe v2 (cloud)",
+        realtime: "Cloud",
+        word_error_rate: None,
+        quality_context: "Not published",
+        coverage: "Sends audio to ElevenLabs",
+        timestamps: "No timestamps",
+        streams: false,
+        runtime: ModelRuntime::ElevenLabs {
+            model_id: "scribe_v2",
+        },
+        languages: &["*"],
+        accepts_language_hint: true,
+        supports_language_detection: true,
+        supports_recognition_hints: false,
+    },
 ];
 
 pub const AUTO_LANGUAGE: &str = "auto";
@@ -787,7 +822,7 @@ pub fn max_audio_chunk_samples(architecture: &str, max_audio_ms: i64) -> Option<
 
 pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
-        bail!("{} is managed by macOS and has no model path", model.name);
+        bail!("{} has no model file", model.name);
     };
     Ok(models_dir()?.join(artifact.filename))
 }
@@ -803,6 +838,9 @@ pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
         ModelRuntime::AppleSpeech => crate::apple_speech::AppleSpeech::is_ready(language),
         #[cfg(not(target_os = "macos"))]
         ModelRuntime::AppleSpeech => false,
+        // Nothing to download. A missing API key must not reopen the setup
+        // gate, so it fails when the model loads instead.
+        ModelRuntime::ElevenLabs { .. } => cfg!(target_os = "macos"),
     }
 }
 
@@ -840,7 +878,7 @@ fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBo
 /// download. Refuses instead of waiting while a download owns the directory.
 pub fn remove_installed(model: &ModelDefinition) -> Result<()> {
     if !matches!(model.runtime, ModelRuntime::Gguf(_)) {
-        bail!("{} is managed by macOS and cannot be deleted", model.name);
+        bail!("{} has no model file to delete", model.name);
     }
     remove_installed_at(&model_path(model)?)
 }
@@ -989,7 +1027,7 @@ pub fn download_with_stage_progress(
     stage: &AtomicU8,
 ) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
-        bail!("{} is installed and managed by macOS", model.name);
+        bail!("{} has nothing to download", model.name);
     };
     let path = download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?;
     // In the background, so an installed model activates at once even
@@ -1467,12 +1505,75 @@ mod tests {
                 "underdog_bark_3_clean",
             ),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
+            (
+                TranscriptionModelId::ElevenLabsScribeV2,
+                "elevenlabs_scribe_v2",
+            ),
         ] {
             assert_eq!(id.as_str(), name);
             assert_eq!(name.parse::<TranscriptionModelId>().unwrap(), id);
             assert_eq!(serde_json::to_value(id).unwrap(), name);
         }
         assert!("unknown".parse::<TranscriptionModelId>().is_err());
+    }
+
+    fn scribe_selection(language: &str) -> TranscriptionSelection {
+        TranscriptionSelection {
+            model: TranscriptionModelId::ElevenLabsScribeV2,
+            language: language.into(),
+            recognition_hints: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_cloud_model_is_unavailable_until_its_labs_switch_is_on() {
+        let scribe = definition(TranscriptionModelId::ElevenLabsScribeV2);
+        assert!(!scribe.available());
+        assert!(validate(&scribe_selection("en")).is_err());
+        assert!(
+            picker_models("en")
+                .iter()
+                .all(|(model, _)| model.id != scribe.id)
+        );
+        crate::labs::with_elevenlabs(true, || {
+            assert_eq!(scribe.available(), cfg!(target_os = "macos"));
+            assert_eq!(
+                validate(&scribe_selection("auto")).is_ok(),
+                cfg!(target_os = "macos")
+            );
+        });
+    }
+
+    #[test]
+    fn the_cloud_model_is_never_recommended_even_with_its_switch_on() {
+        crate::labs::with_elevenlabs(true, || {
+            for (language, _) in LANGUAGES {
+                assert!(
+                    choices_for_runtime(language)
+                        .iter()
+                        .all(|choice| choice.model.id != TranscriptionModelId::ElevenLabsScribeV2),
+                    "{language}"
+                );
+                assert_ne!(
+                    recommended_selection(language).model,
+                    TranscriptionModelId::ElevenLabsScribeV2,
+                    "{language}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn the_cloud_model_has_no_file_and_needs_no_download() {
+        let scribe = definition(TranscriptionModelId::ElevenLabsScribeV2);
+        assert_eq!(scribe.download_bytes(), None);
+        assert_eq!(scribe.size_label(), "Cloud");
+        assert!(!scribe.streams);
+        assert!(!scribe.uses_vocabulary());
+        assert_eq!(is_installed(scribe, "en"), cfg!(target_os = "macos"));
+        assert!(!is_verified(scribe));
+        assert!(model_path(scribe).is_err());
+        assert!(remove_installed(scribe).is_err());
     }
 
     #[test]

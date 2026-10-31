@@ -280,6 +280,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::FillerWords => "lab-filler-words",
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
+        Feature::ElevenLabs => "lab-elevenlabs",
     }
 }
 

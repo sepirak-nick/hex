@@ -46,10 +46,11 @@ pub enum Feature {
     FillerWords,
     SubtitleExport,
     SecondDictationShortcut,
+    ElevenLabs,
 }
 
 impl Feature {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -69,6 +70,7 @@ impl Feature {
         Self::FillerWords,
         Self::SubtitleExport,
         Self::SecondDictationShortcut,
+        Self::ElevenLabs,
     ];
 
     /// The features this OS has.
@@ -87,7 +89,8 @@ impl Feature {
             | Self::PauseBrowser
             | Self::KeepOnClipboard
             | Self::CopyOnly
-            | Self::SecondDictationShortcut => cfg!(target_os = "macos"),
+            | Self::SecondDictationShortcut
+            | Self::ElevenLabs => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -121,6 +124,7 @@ impl Feature {
             Self::FillerWords => "filler-words",
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
+            Self::ElevenLabs => "elevenlabs",
         }
     }
 
@@ -146,6 +150,7 @@ impl Feature {
             Self::FillerWords => "labs.filler_words",
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
+            Self::ElevenLabs => "labs.elevenlabs",
         }
     }
 
@@ -192,6 +197,9 @@ impl Feature {
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
             }
+            Self::ElevenLabs => {
+                "Offer ElevenLabs Scribe as a cloud model, which sends dictation audio to ElevenLabs"
+            }
         }
     }
 
@@ -221,6 +229,7 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words,
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
+            Self::ElevenLabs => settings.labs.elevenlabs,
         }
     }
 
@@ -245,6 +254,10 @@ impl Feature {
             Self::FillerWords => settings.labs.filler_words = on,
             Self::SubtitleExport => settings.labs.subtitle_export = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
+            Self::ElevenLabs => {
+                settings.labs.elevenlabs = on;
+                settings.leave_disabled_cloud_model();
+            }
         }
     }
 }
@@ -262,8 +275,9 @@ const COPY_ONLY: u32 = 1 << 8;
 const SPOKEN_FORMATTING: u32 = 1 << 9;
 const FILLER_WORDS: u32 = 1 << 10;
 const SUBTITLE_EXPORT: u32 = 1 << 11;
+const ELEVENLABS: u32 = 1 << 12;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 12;
+const MINUTES_SHIFT: u32 = 13;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -276,7 +290,12 @@ fn on(bit: u32) -> bool {
 fn state() -> u32 {
     match STATE.load(Ordering::Acquire) {
         0 => {
-            let saved = encode(&AppSettings::saved_labs());
+            // Tests never depend on the developer's real settings.
+            let saved = if cfg!(test) {
+                encode(&LabsSettings::default())
+            } else {
+                encode(&AppSettings::saved_labs())
+            };
             let _ = STATE.compare_exchange(0, saved, Ordering::AcqRel, Ordering::Acquire);
             STATE.load(Ordering::Acquire)
         }
@@ -342,6 +361,35 @@ pub fn subtitle_export() -> bool {
     on(SUBTITLE_EXPORT)
 }
 
+/// ElevenLabs Scribe is offered as a cloud model (macOS). Every consumer of
+/// the model catalog follows this through `ModelDefinition::available`.
+pub fn elevenlabs() -> bool {
+    #[cfg(test)]
+    if let Some(on) = ELEVENLABS_FOR_TEST.get() {
+        return on;
+    }
+    on(ELEVENLABS)
+}
+
+#[cfg(test)]
+thread_local! {
+    static ELEVENLABS_FOR_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `body` with the ElevenLabs switch set on this thread only, so a test
+/// can't change it for tests running beside it.
+#[cfg(test)]
+pub(crate) fn with_elevenlabs<R>(on: bool, body: impl FnOnce() -> R) -> R {
+    struct Restore(Option<bool>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ELEVENLABS_FOR_TEST.set(self.0);
+        }
+    }
+    let _restore = Restore(ELEVENLABS_FOR_TEST.replace(Some(on)));
+    body()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Unload model when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
@@ -369,6 +417,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.spoken_formatting, SPOKEN_FORMATTING),
         (settings.filler_words, FILLER_WORDS),
         (settings.subtitle_export, SUBTITLE_EXPORT),
+        (settings.elevenlabs, ELEVENLABS),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -548,6 +597,32 @@ mod tests {
         assert_ne!(state & SUBTITLE_EXPORT, 0);
         assert_eq!(state & FILLER_WORDS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn elevenlabs_is_its_own_bit_below_the_minutes_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & ELEVENLABS, 0);
+        labs.elevenlabs = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & ELEVENLABS, 0);
+        assert_eq!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn the_test_switch_for_elevenlabs_stays_on_its_thread_and_restores() {
+        assert!(!elevenlabs());
+        with_elevenlabs(true, || {
+            assert!(elevenlabs());
+            with_elevenlabs(false, || assert!(!elevenlabs()));
+            assert!(elevenlabs());
+            std::thread::spawn(|| assert!(!elevenlabs()))
+                .join()
+                .unwrap();
+        });
+        assert!(!elevenlabs());
     }
 
     #[test]

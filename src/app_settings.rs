@@ -1345,6 +1345,11 @@ pub struct LabsSettings {
     /// `second_dictation_hotkey` dictates like the dictation shortcut
     /// (macOS, issue 627).
     pub second_dictation_shortcut: bool,
+    /// ElevenLabs Scribe is offered as a cloud dictation model (macOS).
+    pub elevenlabs: bool,
+    /// A dictation ElevenLabs can't be reached for runs on the last local
+    /// model instead.
+    pub elevenlabs_fallback: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1367,6 +1372,8 @@ impl Default for LabsSettings {
             filler_words: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
+            elevenlabs: false,
+            elevenlabs_fallback: true,
         }
     }
 }
@@ -1911,7 +1918,8 @@ impl KeyboardModelChoice {
         })?;
         match model.runtime {
             crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
-            crate::transcription_models::ModelRuntime::AppleSpeech => {
+            crate::transcription_models::ModelRuntime::AppleSpeech
+            | crate::transcription_models::ModelRuntime::ElevenLabs { .. } => {
                 Err(eyre!("{} can't be switched to by input source", model.name))
             }
         }
@@ -2419,7 +2427,50 @@ impl AppSettings {
         self.transcription.recognition_hints.clear();
     }
 
+    /// Moves a selected cloud model back to the last local one once its Labs
+    /// switch is off. Every path that turns the switch off comes through
+    /// here (the window, `hex labs`, `hex settings`, and loading), reading
+    /// these settings' own switch: the process-wide one follows at the save.
+    pub(crate) fn leave_disabled_cloud_model(&mut self) {
+        let model = crate::transcription_models::definition(self.transcription.model);
+        if !matches!(
+            model.runtime,
+            crate::transcription_models::ModelRuntime::ElevenLabs { .. }
+        ) || (self.labs.elevenlabs && model.available())
+        {
+            return;
+        }
+        tracing::warn!(
+            model = self.transcription.model.as_str(),
+            "left a cloud transcription model whose Labs switch is off"
+        );
+        self.transcription = self.last_local_transcription();
+    }
+
+    /// The most recent local model, preferring one still downloaded.
+    fn last_local_transcription(&self) -> TranscriptionSelection {
+        let local = |selection: &&TranscriptionSelection| {
+            let model = crate::transcription_models::definition(selection.model);
+            matches!(
+                model.runtime,
+                crate::transcription_models::ModelRuntime::Gguf(_)
+            ) && crate::transcription_models::validate(selection).is_ok()
+        };
+        let recents = || self.transcription_recents.iter().rev().filter(local);
+        recents()
+            .find(|selection| {
+                crate::transcription_models::is_installed(
+                    crate::transcription_models::definition(selection.model),
+                    &selection.language,
+                )
+            })
+            .or_else(|| recents().next())
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn migrate_disabled_transcription_model(&mut self) {
+        self.leave_disabled_cloud_model();
         if crate::transcription_models::definition(self.transcription.model).available() {
             return;
         }
@@ -3871,6 +3922,121 @@ mod tests {
 
         settings.migrate_disabled_transcription_model();
         assert_eq!(settings.transcription, TranscriptionSelection::default());
+    }
+
+    fn local(model: TranscriptionModelId, language: &str) -> TranscriptionSelection {
+        TranscriptionSelection {
+            model,
+            language: language.into(),
+            recognition_hints: String::new(),
+        }
+    }
+
+    fn on_the_cloud_model(labs_on: bool) -> AppSettings {
+        let mut settings = AppSettings {
+            transcription: local(TranscriptionModelId::ElevenLabsScribeV2, "en"),
+            transcription_recents: vec![
+                local(TranscriptionModelId::ParakeetV2, "en"),
+                local(TranscriptionModelId::WhisperLargeV3Turbo, "de"),
+                local(TranscriptionModelId::ElevenLabsScribeV2, "en"),
+            ],
+            ..AppSettings::default()
+        };
+        settings.labs.elevenlabs = labs_on;
+        settings
+    }
+
+    #[test]
+    fn turning_elevenlabs_off_returns_to_the_last_local_model() {
+        crate::labs::with_elevenlabs(true, || {
+            let mut settings = on_the_cloud_model(true);
+            crate::labs::Feature::ElevenLabs.set(&mut settings, false);
+            assert!(!settings.labs.elevenlabs);
+            assert_eq!(
+                settings.transcription,
+                local(TranscriptionModelId::WhisperLargeV3Turbo, "de")
+            );
+        });
+    }
+
+    #[test]
+    fn turning_elevenlabs_off_without_a_local_model_uses_the_default() {
+        crate::labs::with_elevenlabs(true, || {
+            let mut settings = on_the_cloud_model(true);
+            settings.transcription_recents.clear();
+            crate::labs::Feature::ElevenLabs.set(&mut settings, false);
+            assert_eq!(settings.transcription, TranscriptionSelection::default());
+        });
+    }
+
+    #[test]
+    fn turning_elevenlabs_off_leaves_a_local_selection_alone() {
+        let mut settings = AppSettings {
+            transcription: local(TranscriptionModelId::ParakeetV2, "en"),
+            ..AppSettings::default()
+        };
+        crate::labs::Feature::ElevenLabs.set(&mut settings, true);
+        crate::labs::Feature::ElevenLabs.set(&mut settings, false);
+        assert_eq!(
+            settings.transcription,
+            local(TranscriptionModelId::ParakeetV2, "en")
+        );
+    }
+
+    #[test]
+    fn loading_a_cloud_selection_with_its_switch_off_migrates_and_persists() {
+        let dir = TestSettingsDir::new("cloud-off");
+        let json = serde_json::to_vec(&on_the_cloud_model(false)).unwrap();
+        fs::write(&dir.path, json).unwrap();
+        crate::labs::with_elevenlabs(true, || {
+            let loaded = AppSettings::load_from(&dir.path).unwrap();
+            assert_eq!(
+                loaded.transcription,
+                local(TranscriptionModelId::WhisperLargeV3Turbo, "de")
+            );
+        });
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&dir.path).unwrap()).unwrap();
+        assert_ne!(saved["transcription"]["model"], "elevenlabs_scribe_v2");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn loading_a_cloud_selection_with_its_switch_on_keeps_it() {
+        let dir = TestSettingsDir::new("cloud-on");
+        let json = serde_json::to_vec(&on_the_cloud_model(true)).unwrap();
+        fs::write(&dir.path, json).unwrap();
+        crate::labs::with_elevenlabs(true, || {
+            let loaded = AppSettings::load_from(&dir.path).unwrap();
+            assert_eq!(
+                loaded.transcription.model,
+                TranscriptionModelId::ElevenLabsScribeV2
+            );
+        });
+    }
+
+    #[test]
+    fn a_cloud_selection_never_stops_settings_from_loading_when_its_switch_is_stale() {
+        // The file says on, but this process still has the switch off.
+        let dir = TestSettingsDir::new("cloud-stale");
+        let json = serde_json::to_vec(&on_the_cloud_model(true)).unwrap();
+        fs::write(&dir.path, json).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            loaded.transcription,
+            local(TranscriptionModelId::WhisperLargeV3Turbo, "de")
+        );
+    }
+
+    #[test]
+    fn the_cloud_model_cant_be_mapped_to_a_keyboard_language() {
+        crate::labs::with_elevenlabs(true, || {
+            let choice = KeyboardModelChoice {
+                model: TranscriptionModelId::ElevenLabsScribeV2,
+                language: "en".into(),
+            };
+            assert!(choice.validate().is_err());
+        });
     }
 
     #[test]

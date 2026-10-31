@@ -333,6 +333,16 @@ const KEYS: &[Key] = &[
         "Labs: second_dictation_hotkey dictates like the dictation shortcut (macOS)",
     ),
     key(
+        "labs.elevenlabs",
+        Kind::Bool,
+        "Labs: offer ElevenLabs Scribe as a cloud model, which sends dictation audio to ElevenLabs (macOS)",
+    ),
+    key(
+        "labs.elevenlabs_fallback",
+        Kind::Bool,
+        "Labs: a dictation ElevenLabs can't be reached for runs on the last local model (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -690,6 +700,7 @@ pub fn apply(
                 candidate.sound_effect_volume = settings.sound_effect_volume;
             }
         }
+        "labs.elevenlabs" => candidate.leave_disabled_cloud_model(),
         "double_tap_lock" if !candidate.double_tap_lock => candidate.double_tap_only = false,
         "double_tap_only" if candidate.double_tap_only => {
             if !candidate.double_tap_lock || candidate.dictation_hotkey.key.is_none() {
@@ -1117,6 +1128,36 @@ mod tests {
     /// Fails when a persisted setting has no `hex settings` key: add one to
     /// `KEYS` (or to `INTERNAL` if it is Hex's own bookkeeping, or to
     /// `OWN_COMMAND` if another `hex` command edits it).
+    #[test]
+    fn turning_elevenlabs_off_here_also_leaves_the_cloud_model() {
+        let local = crate::transcription_models::TranscriptionSelection {
+            model: crate::transcription_models::TranscriptionModelId::ParakeetV2,
+            language: "en".into(),
+            recognition_hints: String::new(),
+        };
+        let mut settings = AppSettings {
+            transcription: crate::transcription_models::TranscriptionSelection {
+                model: crate::transcription_models::TranscriptionModelId::ElevenLabsScribeV2,
+                language: "en".into(),
+                recognition_hints: String::new(),
+            },
+            transcription_recents: vec![local.clone()],
+            ..AppSettings::default()
+        };
+        settings.labs.elevenlabs = true;
+        crate::labs::with_elevenlabs(true, || {
+            let change = apply(&settings, "labs.elevenlabs", "false", &rules()).unwrap();
+            assert!(!change.settings.labs.elevenlabs);
+            assert_eq!(change.settings.transcription, local);
+            let change = apply(&settings, "labs.elevenlabs_fallback", "false", &rules()).unwrap();
+            assert!(!change.settings.labs.elevenlabs_fallback);
+            assert_eq!(
+                change.settings.transcription.model,
+                crate::transcription_models::TranscriptionModelId::ElevenLabsScribeV2
+            );
+        });
+    }
+
     #[test]
     fn every_persisted_setting_has_a_cli_key() {
         // Lists left empty are left out of the file; fill them so they count.
