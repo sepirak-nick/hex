@@ -77,6 +77,7 @@ Call detection                                    // meetings.detect
 Browser calls -> offered as "Call in <browser>": no site is read yet
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
+Notes and live chapters -> OpenCode model (Advanced, with Summarize with OpenCode on): Automatic tries Hex's fast models in turn; a chosen model is the only one tried, so its errors show (meetings.opencode_model, meetings.opencode_variant)
 Notes and live chapters -> Summarize with OpenCode (off by default); it sends
     the transcript excerpt to the OpenCode model
 Idle sleep -> systemd-inhibit idle:sleep (Linux),

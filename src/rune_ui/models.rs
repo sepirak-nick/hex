@@ -1,6 +1,6 @@
 //! The OpenCode model catalog and the model and thinking pickers that each
-//! mode's rewriting uses: the catalog loads off the UI thread only while
-//! the Modes pane shows, a stopped OpenCode is looked for again at a coarse
+//! mode's rewriting and meeting notes use: the catalog loads off the UI thread
+//! only while a pane that uses it shows, a stopped OpenCode is looked for again at a coarse
 //! interval, failures wait for an explicit retry, and choosing a model also
 //! picks its recommended thinking variant.
 
@@ -30,6 +30,8 @@ const MODEL_FIELD_WIDTH: f32 = 240.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Target {
     Mode(Selection),
+    /// Meeting notes, where no model means Hex's ranked models.
+    MeetingNotes,
 }
 
 pub(super) struct Models {
@@ -179,9 +181,16 @@ impl Models {
 }
 
 fn selected(settings: &AppSettings, target: Target) -> (Option<&str>, Option<&str>) {
-    let Target::Mode(selection) = target;
-    let processing = &super::modes::mode(settings, selection).post_processing;
-    (processing.model.as_deref(), processing.variant.as_deref())
+    match target {
+        Target::Mode(selection) => {
+            let processing = &super::modes::mode(settings, selection).post_processing;
+            (processing.model.as_deref(), processing.variant.as_deref())
+        }
+        Target::MeetingNotes => (
+            settings.meetings.opencode_model.as_deref(),
+            settings.meetings.opencode_variant.as_deref(),
+        ),
+    }
 }
 
 fn set_model(
@@ -190,13 +199,20 @@ fn set_model(
     model: Option<String>,
     variant: Option<String>,
 ) {
-    let Target::Mode(selection) = target;
-    let processing = &mut super::modes::mode_mut(settings, selection).post_processing;
-    processing.model = model;
-    processing.variant = variant;
+    match target {
+        Target::Mode(selection) => {
+            let processing = &mut super::modes::mode_mut(settings, selection).post_processing;
+            processing.model = model;
+            processing.variant = variant;
+        }
+        Target::MeetingNotes => {
+            settings.meetings.opencode_model = model;
+            settings.meetings.opencode_variant = variant;
+        }
+    }
 }
 
-fn choose_model(ui: &mut Ui, target: Target, model: Option<String>) {
+pub(super) fn choose_model(ui: &mut Ui, target: Target, model: Option<String>) {
     ui.open = None;
     let variant = model.as_deref().and_then(|key| {
         ui.models
@@ -249,7 +265,11 @@ fn status(models: &Models) -> String {
 /// The model row (and the thinking row when the model has variants).
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
     let (model, variant) = selected(&ui.settings, target);
-    let presentation = model_presentation(&ui.models.state, model);
+    // Notes without a chosen model aren't on OpenCode's default model.
+    let automatic = target == Target::MeetingNotes && model.is_none();
+    let presentation = (!automatic)
+        .then(|| model_presentation(&ui.models.state, model))
+        .flatten();
     let c = &p.k.c;
     let mut field = row()
         .key("model-value")
@@ -286,6 +306,13 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
                     .is_default
                     .then(|| Badge::new(tr("Default")).build(p.k)),
             ),
+        None if automatic => field.child(
+            text("Automatic")
+                .key("name")
+                .font(p.k.ty.ui_medium)
+                .color(p.text())
+                .grow(1.0),
+        ),
         None => field.child(
             text(tr("Search available models"))
                 .key("placeholder")
@@ -325,6 +352,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
     )];
     let catalog = ui.models.catalog();
     let variants = catalog
+        .filter(|_| !automatic)
         .map(|catalog| model_variants(catalog, model))
         .unwrap_or_default();
     if !variants.is_empty() {
@@ -371,7 +399,12 @@ fn model_picker(ui: &Ui, p: Paint, target: Target, field: El, layer: &mut Vec<El
     let mut keys = Vec::new();
     let mut options = Vec::new();
     if let Some(catalog) = catalog {
-        if let Some(name) = &catalog.default_name {
+        if target == Target::MeetingNotes {
+            keys.push(None);
+            let mut option = ComboboxOption::new("0", "Automatic");
+            option.detail = "Tries Hex's fast models in turn".into();
+            options.push(option);
+        } else if let Some(name) = &catalog.default_name {
             keys.push(None);
             let mut option = ComboboxOption::new("0", tr("Use OpenCode default"));
             option.detail = name.clone();

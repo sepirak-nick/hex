@@ -287,6 +287,14 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
                 ui.update(|settings| settings.meetings.summarize_with_opencode = enabled);
             },
         ));
+        if meetings.summarize_with_opencode {
+            more.extend(super::models::rows(
+                ui,
+                p,
+                super::models::Target::MeetingNotes,
+                layer,
+            ));
+        }
         if let Some(error) = &ui.platform.meeting_folder_error {
             // A failed folder change shows where it happened, opening the fold.
             more.push(note("meeting-folder-error", error, p.danger()));

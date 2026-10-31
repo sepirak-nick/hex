@@ -738,7 +738,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   found through its registration file (`opencode_service`). Nothing touches
   OpenCode unless a feature that uses it runs: mode rewriting, meeting notes
   with Summarize with OpenCode, sending an Annotate capture, or the model
-  catalog while the Modes pane shows. Checks stay off the UI thread. A stopped
+  catalog while the Modes pane, or the Meetings pane with Summarize with
+  OpenCode on, shows. Checks stay off the UI thread. A stopped
   service is looked for again at a coarse interval only while that pane shows;
   catalog failures require an explicit retry. Hex's OpenCode workspace folder is
   created by the first request that uses it.

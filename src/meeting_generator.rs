@@ -210,9 +210,14 @@ fn opencode<T: DeserializeOwned>(
         "{instructions}\n\n{prompt}\n\nAnswer with only a JSON object shaped like {shape}, \
          without code fences or any other text."
     );
-    let text =
-        crate::dictation_processor::generate_text(&request, timeout, &AtomicBool::new(false))
-            .map_err(|error| GenerationError::Failed(format!("{error:#}")))?;
+    let model = crate::app_settings::meeting_notes_model();
+    let text = crate::dictation_processor::generate_text(
+        &request,
+        model.as_ref(),
+        timeout,
+        &AtomicBool::new(false),
+    )
+    .map_err(|error| GenerationError::Failed(format!("{error:#}")))?;
     parse_json(&text)
 }
 

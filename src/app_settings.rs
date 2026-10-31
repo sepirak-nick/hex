@@ -24,6 +24,7 @@ static PAUSE_BROWSER_MEDIA: AtomicBool = AtomicBool::new(false);
 static HEX_MICROPHONE_ENABLED: AtomicBool = AtomicBool::new(false);
 static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_NOTES_OPENCODE: AtomicBool = AtomicBool::new(false);
+static MEETING_NOTES_MODEL: RwLock<Option<crate::dictation_processor::Model>> = RwLock::new(None);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 static MEETING_RETENTION: AtomicU8 = AtomicU8::new(MeetingRetention::Forever as u8);
@@ -1100,6 +1101,11 @@ pub struct MeetingSettings {
     /// model, which sends the transcript to it. On a Mac, only when Apple
     /// Intelligence is unavailable or off.
     pub summarize_with_opencode: bool,
+    /// The OpenCode model (`provider/id`) that writes notes; `None` tries
+    /// Hex's ranked fast models in turn. A chosen model is the only one tried.
+    pub opencode_model: Option<String>,
+    /// That model's thinking variant.
+    pub opencode_variant: Option<String>,
     /// Show the floating recording indicator while a meeting is recording.
     pub show_recording_indicator: bool,
     /// Screen corner the floating recording indicator snaps to after dragging.
@@ -1260,6 +1266,8 @@ impl Default for MeetingSettings {
             output_folder: None,
             summarize_with_apple_intelligence: true,
             summarize_with_opencode: false,
+            opencode_model: None,
+            opencode_variant: None,
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
             providers: Vec::new(),
@@ -1272,6 +1280,16 @@ impl Default for MeetingSettings {
 impl MeetingSettings {
     pub fn available(&self) -> bool {
         crate::DEVELOPER_FEATURES_ENABLED || self.enabled
+    }
+
+    /// The model chosen for notes, when one is and it names a provider.
+    pub fn notes_model(&self) -> Option<crate::dictation_processor::Model> {
+        let (provider, id) = self.opencode_model.as_deref()?.split_once('/')?;
+        (!provider.is_empty() && !id.is_empty()).then(|| crate::dictation_processor::Model {
+            provider: provider.into(),
+            id: id.into(),
+            variant: self.opencode_variant.clone(),
+        })
     }
 
     pub fn resolved_output_folder(&self) -> PathBuf {
@@ -2256,6 +2274,9 @@ impl AppSettings {
             Ordering::Release,
         );
         MEETING_NOTES_OPENCODE.store(self.meetings.summarize_with_opencode, Ordering::Release);
+        *MEETING_NOTES_MODEL
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = self.meetings.notes_model();
         MEETING_INDICATOR_ENABLED.store(self.meetings.show_recording_indicator, Ordering::Release);
         MEETING_INDICATOR_CORNER.store(
             self.meetings.recording_indicator_corner as u8,
@@ -2794,6 +2815,14 @@ pub fn meeting_notes_enabled() -> bool {
 /// The OpenCode model may write meeting notes.
 pub fn meeting_notes_with_opencode() -> bool {
     MEETING_NOTES_OPENCODE.load(Ordering::Acquire)
+}
+
+/// The OpenCode model chosen for meeting notes; `None` is automatic.
+pub fn meeting_notes_model() -> Option<crate::dictation_processor::Model> {
+    MEETING_NOTES_MODEL
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -4071,6 +4100,25 @@ mod tests {
                 local(TranscriptionModelId::ParakeetV2, "en")
             );
         });
+    }
+
+    #[test]
+    fn the_notes_model_is_read_from_its_provider_and_id() {
+        let mut meetings = MeetingSettings::default();
+        assert_eq!(meetings.notes_model(), None, "automatic by default");
+        meetings.opencode_model = Some("claude-agent/claude-haiku-4-5-20251001".into());
+        meetings.opencode_variant = Some("low".into());
+        let model = meetings.notes_model().unwrap();
+        assert_eq!(model.provider, "claude-agent");
+        assert_eq!(model.id, "claude-haiku-4-5-20251001");
+        assert_eq!(model.variant.as_deref(), Some("low"));
+        // OpenRouter-style ids keep their own slashes.
+        meetings.opencode_model = Some("openrouter/google/gemini".into());
+        assert_eq!(meetings.notes_model().unwrap().id, "google/gemini");
+        for broken in ["no-provider", "/id", "provider/"] {
+            meetings.opencode_model = Some(broken.into());
+            assert_eq!(meetings.notes_model(), None, "{broken}");
+        }
     }
 
     #[test]

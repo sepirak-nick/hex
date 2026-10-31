@@ -318,14 +318,15 @@ impl Profiles {
     }
 }
 
-/// One generation from OpenCode's default ranked models, for work outside
-/// dictation such as meeting notes.
+/// One generation for work outside dictation such as meeting notes: on
+/// `model` alone when given, else OpenCode's default ranked models in turn.
 pub(crate) fn generate_text(
     prompt: &str,
+    model: Option<&Model>,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<String> {
-    generate_cancellable(prompt, None, deadline, cancelled)
+    generate_cancellable(prompt, model, deadline, cancelled)
 }
 
 /// Runs one generation and reports it as a processing observation. The text is
@@ -894,6 +895,30 @@ fn wait_for_generation_retry(
         thread::sleep(Duration::from_millis(20));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod live_tests {
+    /// Costs a little on the provider behind the model.
+    #[test]
+    #[ignore = "asks the running OpenCode; needs HEX_LIVE_OPENCODE_MODEL as provider/id"]
+    fn live_a_chosen_model_answers() {
+        let key = std::env::var("HEX_LIVE_OPENCODE_MODEL").expect("HEX_LIVE_OPENCODE_MODEL");
+        let (provider, id) = key.split_once('/').unwrap();
+        let model = super::Model {
+            provider: provider.into(),
+            id: id.into(),
+            variant: None,
+        };
+        let answer = super::generate_text(
+            "Reply with only the word OK.",
+            Some(&model),
+            std::time::Duration::from_secs(60),
+            &std::sync::atomic::AtomicBool::new(false),
+        );
+        eprintln!("OPENCODE {key}: {answer:?}");
+        answer.unwrap();
+    }
 }
 
 #[cfg(test)]

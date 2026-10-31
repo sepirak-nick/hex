@@ -362,6 +362,16 @@ const KEYS: &[Key] = &[
         Kind::Bool,
         "Title and summarize meetings with the OpenCode model (sends the transcript to it)",
     ),
+    optional(
+        "meetings.opencode_model",
+        Kind::Text,
+        "The OpenCode model that writes meeting notes, as provider/id; none (the default) tries Hex's fast models in turn",
+    ),
+    optional(
+        "meetings.opencode_variant",
+        Kind::Text,
+        "That model's thinking variant; none uses the model's default",
+    ),
     key(
         "meetings.show_recording_indicator",
         Kind::Bool,
@@ -701,6 +711,20 @@ pub fn apply(
             }
         }
         "labs.elevenlabs" => candidate.leave_disabled_cloud_model(),
+        "meetings.opencode_model" => {
+            if candidate.meetings.opencode_model.is_some()
+                && candidate.meetings.notes_model().is_none()
+            {
+                return Err(invalid(
+                    name,
+                    "expected provider/id, such as opencode/gpt-5.4-mini",
+                ));
+            }
+            // A variant belongs to the model it was chosen for.
+            if candidate.meetings.opencode_model != settings.meetings.opencode_model {
+                candidate.meetings.opencode_variant = None;
+            }
+        }
         "double_tap_lock" if !candidate.double_tap_lock => candidate.double_tap_only = false,
         "double_tap_only" if candidate.double_tap_only => {
             if !candidate.double_tap_lock || candidate.dictation_hotkey.key.is_none() {
@@ -1128,6 +1152,29 @@ mod tests {
     /// Fails when a persisted setting has no `hex settings` key: add one to
     /// `KEYS` (or to `INTERNAL` if it is Hex's own bookkeeping, or to
     /// `OWN_COMMAND` if another `hex` command edits it).
+    #[test]
+    fn the_notes_model_is_set_as_provider_and_id_and_clears_its_variant() {
+        let mut settings = AppSettings::default();
+        settings.meetings.opencode_model = Some("opencode/gpt-5.4".into());
+        settings.meetings.opencode_variant = Some("low".into());
+        let key = "meetings.opencode_model";
+        assert_eq!(
+            apply(&settings, key, "no-provider", &rules())
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
+        let change = apply(&settings, key, "claude-agent/haiku", &rules()).unwrap();
+        assert_eq!(
+            change.settings.meetings.opencode_model.as_deref(),
+            Some("claude-agent/haiku")
+        );
+        assert_eq!(change.settings.meetings.opencode_variant, None);
+        let change = apply(&settings, key, "none", &rules()).unwrap();
+        assert_eq!(change.settings.meetings.opencode_model, None);
+        assert_eq!(change.settings.meetings.opencode_variant, None);
+    }
+
     #[test]
     fn turning_elevenlabs_off_here_also_leaves_the_cloud_model() {
         let local = crate::transcription_models::TranscriptionSelection {

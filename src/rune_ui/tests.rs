@@ -1466,6 +1466,26 @@ fn the_cloud_card_warns_and_takes_a_key_before_it_can_be_chosen() {
 }
 
 #[test]
+fn the_notes_model_starts_automatic_and_saves_with_its_recommended_variant() {
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    let key = "anthropic/claude-haiku-4-5".to_owned();
+    assert_eq!(rt.state.settings.meetings.opencode_model, None);
+    models::choose_model(
+        &mut rt.state,
+        models::Target::MeetingNotes,
+        Some(key.clone()),
+    );
+    assert_eq!(rt.state.settings.meetings.opencode_model, Some(key));
+    assert_eq!(
+        rt.state.settings.meetings.notes_model().unwrap().provider,
+        "anthropic"
+    );
+    models::choose_model(&mut rt.state, models::Target::MeetingNotes, None);
+    assert_eq!(rt.state.settings.meetings.opencode_model, None);
+    assert_eq!(rt.state.settings.meetings.opencode_variant, None);
+}
+
+#[test]
 fn local_models_show_no_cloud_warning() {
     let rt = runtime("picker", true, (980.0, 3000.0));
     assert!(rt.find("model0/cloud-warning").is_none());
