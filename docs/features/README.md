@@ -29,9 +29,9 @@ have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Labs](labs.md) is one switch, on by default, for every unfinished feature.
-[ElevenLabs transcription](elevenlabs.md) is its cloud dictation model (macOS, this fork).
 Its Restore shortcut default toggle (off by default) puts a Restore default
 button beside Paste last dictation's shortcut (#613).
+[ElevenLabs transcription](elevenlabs.md) is its cloud dictation model (macOS, this fork).
 The [vocabulary](vocabulary.md) biases transcription toward names you list.
 [Annotate](capture.md) (macOS, Linux,
 and Windows) records the screen while you draw and talk and sends it to an agent.
