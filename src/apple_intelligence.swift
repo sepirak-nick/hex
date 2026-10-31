@@ -1,5 +1,5 @@
 import Foundation
-#if canImport(FoundationModels)
+#if HEX_FOUNDATION_MODELS
 import FoundationModels
 #endif
 
@@ -33,7 +33,7 @@ private let contextWindowMarker = "context-window:"
 /// A refused or guardrail-blocked transcript, which retrying won't change.
 private let refusalMarker = "refused:"
 
-#if canImport(FoundationModels)
+#if HEX_FOUNDATION_MODELS
 @available(macOS 26.0, *)
 @Generable
 private struct GeneratedNotes {
@@ -172,7 +172,7 @@ private func writeError(
 /// 3 model not ready, 4 unsupported macOS, 5 unknown reason.
 @_cdecl("hex_apple_intelligence_availability")
 public func hexAppleIntelligenceAvailability() -> Int32 {
-    #if canImport(FoundationModels)
+    #if HEX_FOUNDATION_MODELS
     guard #available(macOS 26.0, *) else { return 4 }
     switch SystemLanguageModel.default.availability {
     case .available:
@@ -193,7 +193,7 @@ public func hexAppleIntelligenceAvailability() -> Int32 {
 
 @_cdecl("hex_apple_intelligence_context_size")
 public func hexAppleIntelligenceContextSize() -> Int {
-    #if canImport(FoundationModels)
+    #if HEX_FOUNDATION_MODELS
     guard #available(macOS 26.0, *) else { return 0 }
     return SystemLanguageModel.default.contextSize
     #else
@@ -209,7 +209,7 @@ public func hexAppleIntelligenceNotes(
     _ timeoutMs: UInt64,
     _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> UnsafeMutablePointer<CChar>? {
-    #if canImport(FoundationModels)
+    #if HEX_FOUNDATION_MODELS
     guard #available(macOS 26.0, *), let instructions, let prompt else {
         writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
         return nil
@@ -277,7 +277,7 @@ public func hexAppleIntelligenceChapter(
     _ timeoutMs: UInt64,
     _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> UnsafeMutablePointer<CChar>? {
-    #if canImport(FoundationModels)
+    #if HEX_FOUNDATION_MODELS
     guard #available(macOS 26.0, *) else {
         writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
         return nil
@@ -308,7 +308,7 @@ public func hexAppleIntelligenceChapterLines(
     _ timeoutMs: UInt64,
     _ errorOutput: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
 ) -> UnsafeMutablePointer<CChar>? {
-    #if canImport(FoundationModels)
+    #if HEX_FOUNDATION_MODELS
     guard #available(macOS 26.0, *) else {
         writeError(BridgeError("Apple Intelligence requires macOS 26."), to: errorOutput)
         return nil
