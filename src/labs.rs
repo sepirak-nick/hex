@@ -276,8 +276,9 @@ const SPOKEN_FORMATTING: u32 = 1 << 9;
 const FILLER_WORDS: u32 = 1 << 10;
 const SUBTITLE_EXPORT: u32 = 1 << 11;
 const ELEVENLABS: u32 = 1 << 12;
+const ELEVENLABS_FALLBACK: u32 = 1 << 13;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 13;
+const MINUTES_SHIFT: u32 = 14;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -371,6 +372,13 @@ pub fn elevenlabs() -> bool {
     on(ELEVENLABS)
 }
 
+/// A dictation ElevenLabs can't be reached for runs on the last local model
+/// (macOS; read when that happens).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn elevenlabs_fallback() -> bool {
+    on(ELEVENLABS_FALLBACK)
+}
+
 #[cfg(test)]
 thread_local! {
     static ELEVENLABS_FOR_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
@@ -418,6 +426,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.filler_words, FILLER_WORDS),
         (settings.subtitle_export, SUBTITLE_EXPORT),
         (settings.elevenlabs, ELEVENLABS),
+        (settings.elevenlabs_fallback, ELEVENLABS_FALLBACK),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -608,6 +617,17 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & ELEVENLABS, 0);
         assert_eq!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn the_elevenlabs_fallback_is_on_by_default_and_has_its_own_bit() {
+        let mut labs = LabsSettings::default();
+        assert_ne!(encode(&labs) & ELEVENLABS_FALLBACK, 0);
+        labs.elevenlabs_fallback = false;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_eq!(state & ELEVENLABS_FALLBACK, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

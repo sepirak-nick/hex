@@ -187,6 +187,10 @@ fn prepare_selection(
             } else {
                 crate::transcription_models::download_with_progress(model, canceled, progress)?;
             }
+        } else if !crate::transcription_models::speech_detector_installed() {
+            // A cloud model never downloads a file, which is what would
+            // otherwise fetch the detector that keeps silence from uploading.
+            crate::speech_detector::start_download();
         }
         check_canceled()?;
         crate::speech_detector::prewarm();

@@ -1545,6 +1545,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_elevenlabs_upload_always_ends_inside_the_job_deadline() {
+        for seconds in [0_usize, 1, 60, 600, 3_600, 36_000] {
+            let samples = seconds * 16_000;
+            let upload = Duration::from_secs(crate::elevenlabs::timeout_seconds(samples));
+            assert!(
+                upload < Deadlines::PRODUCTION.job_for(samples),
+                "{seconds} s"
+            );
+        }
+    }
+
+    #[test]
     fn source_labels_distinguish_fallbacks() {
         assert_eq!(Source::Stream.label(), "stream");
         assert_eq!(Source::Offline.label(), "offline");

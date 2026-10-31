@@ -177,9 +177,8 @@ pub enum ModelRuntime {
     AppleSpeech,
     /// A cloud model: dictation audio goes to ElevenLabs. `model_id` is the
     /// API's name for it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     ElevenLabs {
-        // Read once the upload path exists.
-        #[allow(dead_code)]
         model_id: &'static str,
     },
 }

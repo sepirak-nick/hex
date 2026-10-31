@@ -92,6 +92,15 @@ impl ElevenLabs {
         })
     }
 
+    /// The model without its key check, which would read real files.
+    #[cfg(test)]
+    pub(crate) fn for_test(selection: &TranscriptionSelection) -> Self {
+        Self {
+            selection: selection.clone(),
+            model_id: "scribe_v2",
+        }
+    }
+
     pub fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
         &self.selection == selection
     }
@@ -335,8 +344,7 @@ fn post(
     if stop() {
         return Err(UploadError::Cancelled);
     }
-    let unreachable =
-        |error: &dyn std::fmt::Display| UploadError::Unreachable(format!("{error}"));
+    let unreachable = |error: &dyn std::fmt::Display| UploadError::Unreachable(format!("{error}"));
     let mut command: Command = crate::background_process::command(CURL);
     let mut child = command
         .args(curl_arguments(request))
@@ -372,7 +380,9 @@ fn post(
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(unreachable(&format_args!("could not wait for curl: {error}")));
+                return Err(unreachable(&format_args!(
+                    "could not wait for curl: {error}"
+                )));
             }
         }
     };
@@ -505,7 +515,10 @@ mod tests {
     /// Answers one request with `status` and `body`, and reports what it read.
     fn server(status: u16, body: String) -> (String, mpsc::Receiver<Received>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/v1/speech-to-text", listener.local_addr().unwrap());
+        let url = format!(
+            "http://{}/v1/speech-to-text",
+            listener.local_addr().unwrap()
+        );
         let (send, receive) = mpsc::channel();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
@@ -590,7 +603,8 @@ mod tests {
         let sample = br#"{"language_code":"eng","language_probability":0.98,"text":" Hello world. ","words":[]}
 200"#;
         assert_eq!(parse_response(sample).unwrap(), "Hello world.");
-        let unreachable = |text: &[u8]| matches!(parse_response(text), Err(UploadError::Unreachable(_)));
+        let unreachable =
+            |text: &[u8]| matches!(parse_response(text), Err(UploadError::Unreachable(_)));
         let rejected = |text: &[u8]| matches!(parse_response(text), Err(UploadError::Rejected(_)));
         assert!(rejected(b"{\"detail\":\"secret\"}\n401"));
         assert!(rejected(b"{}\n403"));
@@ -623,7 +637,10 @@ mod tests {
             Some("from-file")
         );
         let environment = || Some("from-environment".to_owned());
-        assert_eq!(source_from(environment(), Some(&path)), KeySource::Environment);
+        assert_eq!(
+            source_from(environment(), Some(&path)),
+            KeySource::Environment
+        );
         assert_eq!(
             read_key_from(environment(), &path).unwrap().as_deref(),
             Some("from-environment")

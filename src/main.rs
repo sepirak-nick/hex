@@ -55,6 +55,8 @@ mod dictation_processor;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod dot_scope;
 mod durable;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod elevenlabs;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

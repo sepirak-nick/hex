@@ -414,7 +414,13 @@ impl DictationWorker {
             print: Mutex::new(print),
             ..JobControl::default()
         });
-        let (_, selection) = crate::app_settings::transcription_selection();
+        // Another app's dictation stays on this Mac; only the user's own
+        // press-to-paste may follow the selection to the cloud.
+        let selection = if matches!(target, TranscriptionTarget::Service) {
+            crate::app_settings::local_transcription_selection()
+        } else {
+            crate::app_settings::transcription_selection().1
+        };
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
         let stream = clip.take_stream();
@@ -429,11 +435,8 @@ impl DictationWorker {
                     return Err("dictation was cancelled".to_string());
                 }
                 let _busy = DictationInference::begin();
-                let transcriber = model
-                    .activate(&selection)
-                    .map_err(|error| error.to_string())?;
-                transcriber
-                    .transcribe(samples)
+                model
+                    .transcribe_dictation(&selection, samples, &control.cancelled)
                     .map_err(|error| error.to_string())
             })
         };
