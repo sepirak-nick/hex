@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn a_warm_cloud_model_counts_as_no_loaded_model_for_other_work() {
-        let mut warm = super::WarmTranscriber::serving(loaded_cloud_model());
+        let warm = super::WarmTranscriber::serving(loaded_cloud_model());
         assert!(warm.gguf_selection().is_none(), "/streams answers 503");
         assert!(warm.stream_options().is_none(), "dictation never streams");
     }
@@ -322,15 +322,21 @@ mod tests {
     #[ignore = "uploads to ElevenLabs; needs a key and HEX_LIVE_WAV"]
     fn live_cancel_kills_curl_and_ps_never_shows_the_key() {
         use std::sync::atomic::{AtomicBool, Ordering};
+        // Only the upload's own curl: a test harness's script may name the
+        // endpoint or the key too.
         let processes = || {
             String::from_utf8(
                 std::process::Command::new("/bin/ps")
-                    .args(["-axww", "-o", "command"])
+                    .args(["-axww", "-o", "command="])
                     .output()
                     .unwrap()
                     .stdout,
             )
             .unwrap()
+            .lines()
+            .filter(|line| line.starts_with("/usr/bin/curl -q"))
+            .collect::<Vec<_>>()
+            .join("\n")
         };
         let key = std::env::var("HEX_LIVE_KEY_PREFIX").expect("HEX_LIVE_KEY_PREFIX");
         crate::labs::with_elevenlabs(true, || {
@@ -348,12 +354,13 @@ mod tests {
             let cancel_ended = std::time::Instant::now();
             let seen = watcher.join().unwrap();
             assert_eq!(error, crate::elevenlabs::UploadError::Cancelled);
-            assert!(seen.contains("speech-to-text"), "curl was still running");
-            assert!(!seen.contains(&key), "ps showed the key");
             assert!(
-                !processes().contains("api.elevenlabs.io"),
-                "curl outlived it"
+                seen.contains("api.elevenlabs.io"),
+                "curl was running: {seen:?}"
             );
+            assert!(!seen.contains(&key), "ps showed the key");
+            eprintln!("CURL ARGS checked: {} characters", seen.len());
+            assert_eq!(processes(), "", "curl outlived it");
             eprintln!("CANCEL ok, gone after {:?}", cancel_ended.elapsed());
         });
     }

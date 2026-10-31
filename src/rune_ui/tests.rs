@@ -1440,6 +1440,38 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
     assert!(!rt.state.picker.open);
 }
 
+#[test]
+fn the_cloud_card_warns_and_takes_a_key_before_it_can_be_chosen() {
+    crate::labs::with_elevenlabs(true, || {
+        let mut rt = runtime("picker", true, (980.0, 3000.0));
+        let card = picker_card("en", TranscriptionModelId::ElevenLabsScribeV2);
+        let path = |tail: &str| format!("{card}/{tail}");
+        // Without a key: a masked field, nothing to choose, a warning.
+        assert!(rt.find(&path("cloud-warning")).is_some());
+        assert!(rt.find(&path("api-key/key-field")).is_some());
+        assert!(rt.find(&path("top/actions/choose-model")).is_none());
+        tap(&mut rt, &card);
+        assert!(rt.state.picker.open);
+        assert!(rt.state.preparing.is_none(), "the card can't be chosen yet");
+        // Saved: the key is gone from the field, and the model can be chosen.
+        tap(&mut rt, &path("api-key/save-key"));
+        assert!(rt.find(&path("api-key/key-field")).is_none());
+        assert!(rt.find(&path("api-key/remove-key")).is_some());
+        assert!(rt.find(&path("top/actions/choose-model")).is_some());
+        // Removed: back to the field.
+        tap(&mut rt, &path("api-key/remove-key"));
+        assert!(rt.find(&path("api-key/key-field")).is_some());
+        assert!(rt.find(&path("top/actions/choose-model")).is_none());
+    });
+}
+
+#[test]
+fn local_models_show_no_cloud_warning() {
+    let rt = runtime("picker", true, (980.0, 3000.0));
+    assert!(rt.find("model0/cloud-warning").is_none());
+    assert!(rt.find("model0/api-key").is_none());
+}
+
 /// The card index of `model` in the picker over `language`.
 fn picker_card(language: &str, model: TranscriptionModelId) -> String {
     let index = crate::transcription_models::picker_models(language)

@@ -214,6 +214,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Second dictation shortcut"),
                 tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
             ));
+            rows.push(row(
+                Feature::ElevenLabs,
+                &WAVE,
+                "ElevenLabs transcription",
+                "Adds a cloud speech model that sends dictation audio to ElevenLabs",
+            ));
         }
     }
     rows.push(row(

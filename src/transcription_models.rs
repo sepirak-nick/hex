@@ -272,6 +272,11 @@ impl ModelDefinition {
             .collect()
     }
 
+    /// Whether using this model sends audio off this Mac.
+    pub const fn is_cloud(&self) -> bool {
+        matches!(self.runtime, ModelRuntime::ElevenLabs { .. })
+    }
+
     /// Benchmark accuracy, the inverse of its word error rate: `98.4%`.
     pub fn accuracy_label(&self) -> Option<String> {
         self.word_error_rate.map(accuracy_label)
@@ -608,8 +613,8 @@ pub const MODELS: &[ModelDefinition] = &[
         name: "ElevenLabs Scribe v2 (cloud)",
         realtime: "Cloud",
         word_error_rate: None,
-        quality_context: "Not published",
-        coverage: "Sends audio to ElevenLabs",
+        quality_context: "ElevenLabs hosted",
+        coverage: "Detects language",
         timestamps: "No timestamps",
         streams: false,
         runtime: ModelRuntime::ElevenLabs {

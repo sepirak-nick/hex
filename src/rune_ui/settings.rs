@@ -967,9 +967,15 @@ pub(super) fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::C
     if let Some(error) = &transcription.error {
         return Some((error.clone(), p.danger()));
     }
-    let model = transcription.preparing?;
-    let name = transcription_models::definition(model).name;
+    let Some(model) = transcription.preparing else {
+        return transcription_models::definition(ui.settings.transcription.model)
+            .is_cloud()
+            .then(|| ("Audio is sent to ElevenLabs".to_owned(), p.warning()));
+    };
+    let definition = transcription_models::definition(model);
+    let name = definition.name;
     let stage = match transcription.preparation_stage {
+        _ if definition.is_cloud() => "Checking the API key".to_owned(),
         Some(ModelPreparationStage::Verifying) => tr("Verifying model").to_string(),
         Some(ModelPreparationStage::Loading) => tr("Loading model").to_string(),
         _ => format!(

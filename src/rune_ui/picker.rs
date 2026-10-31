@@ -8,14 +8,15 @@
 //! ready. Downloaded models other than the active one can be deleted after a
 //! confirmation.
 
-use rune::{El, col, el, row, text};
-use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress};
+use rune::{El, TextEdit, col, el, row, text};
+use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress, TextInput};
 
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::lists::error_panel;
 use super::{Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
+use crate::elevenlabs::{self, KEY_ENVIRONMENT, KeySource};
 use crate::transcription_models::{
     self, ModelDefinition, ModelPreparationStage, ModelRuntime, TranscriptionModelId,
     TranscriptionSelection, language_name,
@@ -50,6 +51,11 @@ pub(super) struct Picker {
     /// Installed models for fixtures; live windows ask the filesystem.
     pub(super) installed: Option<Vec<TranscriptionModelId>>,
     pub(super) fallback: Option<LanguageFallback>,
+    /// The cloud model's API key as typed; cleared once saved.
+    key_edit: TextEdit,
+    /// Where the key in use comes from, read as the picker opens.
+    key_source: Option<KeySource>,
+    key_error: Option<String>,
 }
 
 impl Picker {
@@ -78,11 +84,108 @@ pub(super) fn open(ui: &mut Ui) {
     ui.open = None;
     ui.picker.open = true;
     ui.picker.clear_deletion();
+    if ui.live() {
+        ui.picker.key_source = Some(elevenlabs::key_source());
+    }
 }
 
 pub(super) fn close(ui: &mut Ui) {
     ui.picker.open = false;
     ui.picker.clear_deletion();
+    forget_typed_key(ui);
+}
+
+fn forget_typed_key(ui: &mut Ui) {
+    ui.picker.key_edit = TextEdit::new("");
+    ui.picker.key_error = None;
+}
+
+/// Saves the typed key to its owner-only file. It never reaches settings.
+fn save_key(ui: &mut Ui) {
+    let saved = if ui.live() {
+        elevenlabs::save_key(&ui.picker.key_edit.text)
+    } else {
+        Ok(())
+    };
+    match saved {
+        Ok(()) => {
+            forget_typed_key(ui);
+            ui.picker.key_source = Some(if ui.live() {
+                elevenlabs::key_source()
+            } else {
+                KeySource::File
+            });
+        }
+        Err(error) => ui.picker.key_error = Some(error.to_string()),
+    }
+}
+
+fn remove_key(ui: &mut Ui) {
+    let removed = if ui.live() {
+        elevenlabs::remove_key()
+    } else {
+        Ok(())
+    };
+    match removed {
+        Ok(()) => {
+            forget_typed_key(ui);
+            ui.picker.key_source = Some(if ui.live() {
+                elevenlabs::key_source()
+            } else {
+                KeySource::Missing
+            });
+        }
+        Err(error) => ui.picker.key_error = Some(error.to_string()),
+    }
+}
+
+/// The cloud card's key row: a masked field to add one, or where it's from.
+fn key_row(ui: &Ui, p: Paint) -> El {
+    let note = |key: &str, words: &str| {
+        text(words)
+            .key(key)
+            .font(p.k.ty.small)
+            .color(p.muted())
+            .grow(1.0)
+            .shrink()
+    };
+    let mut row = row().key("api-key").gap(8.0).center_y();
+    match ui.picker.key_source.unwrap_or(KeySource::Missing) {
+        KeySource::Environment => {
+            row = row.child(note("key-source", &format!("From {KEY_ENVIRONMENT}")));
+        }
+        KeySource::File => {
+            row = row.child(note("key-source", "Key saved")).child(button(
+                p,
+                "remove-key",
+                "Remove",
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| remove_key(ui),
+            ));
+        }
+        KeySource::Missing => {
+            row = row
+                .child(
+                    TextInput::new(&ui.picker.key_edit)
+                        .secure()
+                        .placeholder("ElevenLabs API key")
+                        .on_edit(|ui: &mut Ui| &mut ui.picker.key_edit)
+                        .on_submit(|ui: &mut Ui, _| save_key(ui))
+                        .build(p.k)
+                        .key("key-field")
+                        .grow(1.0)
+                        .shrink(),
+                )
+                .child(button(
+                    p,
+                    "save-key",
+                    "Save",
+                    ButtonKind::Secondary,
+                    |ui: &mut Ui, _| save_key(ui),
+                ));
+        }
+    }
+    row
 }
 
 fn cancel(ui: &mut Ui) {
@@ -194,6 +297,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     {
         models = models.child(model_card(ui, p, index, model, recommendation, &language));
     }
+    // The title says local until a cloud model is on offer.
+    let title =
+        if transcription_models::definition(TranscriptionModelId::ElevenLabsScribeV2).available() {
+            "Transcription"
+        } else {
+            tr("Local transcription")
+        };
     let header = row()
         .key("picker-header")
         .h(52.0)
@@ -201,7 +311,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .pr(12.0)
         .center_y()
         .child(
-            text(tr("Local transcription"))
+            text(title)
                 .key("title")
                 .font(p.k.ty.body_medium)
                 .color(p.text())
@@ -291,6 +401,10 @@ fn model_card(
     let status = if preparing {
         let transcription = transcription.expect("preparing comes from the snapshot");
         match transcription.preparation_stage {
+            _ if model.is_cloud() => Status::Preparing {
+                label: "Checking the API key".into(),
+                progress: None,
+            },
             Some(ModelPreparationStage::Verifying) => Status::Preparing {
                 label: tr("Verifying model").into(),
                 progress: None,
@@ -333,11 +447,16 @@ fn model_card(
             tr(model.quality_context),
             tr(model.timestamps),
         ])
-        .chain((installed && !active).then(|| tr("Installed")))
+        .chain((installed && !active && !model.is_cloud()).then(|| tr("Installed")))
         .collect::<Vec<_>>()
         .join(" · ");
+    // Without a key there's nothing to choose yet, and a press on the card
+    // would also land on the key field inside it.
+    let needs_key = model.is_cloud()
+        && ui.picker.key_source.unwrap_or(KeySource::Missing) == KeySource::Missing;
     let mut actions = row().key("actions").gap(8.0).center_y();
     match &status {
+        Status::Available { .. } if needs_key => {}
         Status::Active => {
             actions = actions.child(
                 row()
@@ -417,6 +536,9 @@ fn model_card(
     if model.streams {
         title = title.child(Badge::new(tr("Streams")).build(p.k));
     }
+    if model.is_cloud() {
+        title = title.child(Badge::new("Cloud").build(p.k));
+    }
     let metric = |key: &str, label: &str, value: String| {
         row()
             .key(key)
@@ -468,7 +590,13 @@ fn model_card(
                 .child(metric(
                     "accuracy",
                     tr("Accuracy"),
-                    model.accuracy_label().unwrap_or_else(|| "System".into()),
+                    model.accuracy_label().unwrap_or_else(|| {
+                        if model.is_cloud() {
+                            "Not published".into()
+                        } else {
+                            "System".into()
+                        }
+                    }),
                 )),
         );
     if !model.supports_language(language) {
@@ -498,6 +626,29 @@ fn model_card(
             .wrap(),
         );
     }
+    if model.is_cloud() {
+        card = card
+            .child(
+                text(
+                    "Your dictation audio is sent to ElevenLabs, under their retention \
+                     terms. Meetings, Annotate, and other apps stay on this Mac.",
+                )
+                .key("cloud-warning")
+                .font(p.k.ty.small)
+                .color(p.warning())
+                .wrap(),
+            )
+            .child(key_row(ui, p));
+        if let Some(error) = &ui.picker.key_error {
+            card = card.child(
+                text(error.as_str())
+                    .key("key-error")
+                    .font(p.k.ty.small)
+                    .color(p.danger())
+                    .wrap(),
+            );
+        }
+    }
     // One bar from download through verifying and loading: it fills, then
     // sweeps while the stage has no measure.
     if let Status::Preparing { label, progress } = status {
@@ -509,7 +660,7 @@ fn model_card(
         };
         card = card.child(bar.build(p.k).key("progress"));
     }
-    if !active && !preparing {
+    if !active && !preparing && !needs_key {
         card = card
             .role("button")
             .hover(c.hover)
@@ -537,6 +688,22 @@ pub(super) fn fixture(ui: &mut Ui, downloading: Option<TranscriptionModelId>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cloud_model() -> &'static ModelDefinition {
+        transcription_models::definition(TranscriptionModelId::ElevenLabsScribeV2)
+    }
+
+    #[test]
+    fn only_the_cloud_model_counts_as_cloud() {
+        assert!(cloud_model().is_cloud());
+        assert!(
+            transcription_models::MODELS
+                .iter()
+                .filter(|model| model.is_cloud())
+                .count()
+                == 1
+        );
+    }
 
     #[test]
     fn selected_transcription_model_is_not_active_until_installed() {

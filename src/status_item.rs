@@ -246,7 +246,9 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     let model_items = MODELS
         .iter()
         .enumerate()
-        .filter(|(_, model)| model.available())
+        // A cloud model's Labs switch can turn on while this menu exists; the
+        // refresh below shows only what's available.
+        .filter(|(_, model)| model.available() || model.is_cloud())
         .map(|(index, model)| {
             let item = add_item(&models, &target, model.name, sel!(selectModel:), mtm);
             item.setTag(index as isize);
