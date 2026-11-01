@@ -381,8 +381,8 @@ pub fn take_clicks(start_ms: u64) -> Vec<Click> {
 /// Divides what was said between the clicks, keeping sentences whole. A
 /// sentence goes to the click made while saying it, else to the nearest click,
 /// so both "this button *click*" and "*click* this button" work. Only a sentence
-/// with several clicks in it is divided: at its commas and pauses, then, for a
-/// clause that still has several, word by word.
+/// with several clicks in it is divided: at its commas, pauses, and joining words
+/// such as "and", then, for a clause that still has several, word by word.
 fn split_words(words: &[TimedWord], clicks: &[Click], start_ms: u64) -> Vec<String> {
     let mut notes = vec![Vec::new(); clicks.len()];
     if !clicks.is_empty() {
@@ -441,7 +441,7 @@ fn assign_run<'a>(
     }
     match level {
         Level::Sentence => {
-            for clause in runs(run, ends_clause, CLAUSE_PAUSE_MS) {
+            for clause in clauses(run) {
                 assign_run(clause, clicks, start_ms, Level::Clause, notes);
             }
         }
@@ -475,6 +475,29 @@ fn runs(words: &[TimedWord], ends: fn(&str) -> bool, pause_ms: u64) -> Vec<&[Tim
         runs.push(&words[start..]);
     }
     runs
+}
+
+/// A sentence with several clicks in it, cut also before words that join two
+/// remarks, for "change team to organization and change this price to five".
+fn clauses(sentence: &[TimedWord]) -> Vec<&[TimedWord]> {
+    let mut clauses = Vec::new();
+    for clause in runs(sentence, ends_clause, CLAUSE_PAUSE_MS) {
+        let mut start = 0;
+        for index in 1..clause.len() {
+            if joins_remarks(&clause[index].text) {
+                clauses.push(&clause[start..index]);
+                start = index;
+            }
+        }
+        clauses.push(&clause[start..]);
+    }
+    clauses
+}
+
+fn joins_remarks(word: &str) -> bool {
+    ["and", "but", "then"]
+        .iter()
+        .any(|joining| word.eq_ignore_ascii_case(joining))
 }
 
 fn ends_sentence(word: &str) -> bool {
@@ -683,6 +706,48 @@ mod tests {
                  from Talk and Click Demo to Talk and Fix Demo.",
                 "Change this price to $5",
             ]
+        );
+    }
+
+    /// The second real recording, whose five clicks were 4.2, 4.1, 3.7, and 3.3 s
+    /// apart. Word timings around them are reconstructed.
+    #[test]
+    fn five_clicks_each_get_their_own_remark() {
+        let mut words = spoken(0, "Um, can we make it so this says talk and click demo?");
+        words.extend(spoken(
+            3_800,
+            "Let's change that to a better, more stylized button.",
+        ));
+        words.extend(spoken(7_500, "Let's change this button the same way."));
+        words.extend(spoken(
+            10_200,
+            "Let's team-- change team to organization and change this price to five hundred dollars",
+        ));
+        let clicks = [
+            click(1_000, "h1"),
+            click(5_198, ".starter button"),
+            click(9_323, ".team button"),
+            click(13_015, "h2"),
+            click(16_324, "p"),
+        ];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            [
+                "Um, can we make it so this says talk and click demo?",
+                "Let's change that to a better, more stylized button.",
+                "Let's change this button the same way.",
+                "Let's team-- change team to organization",
+                "and change this price to five hundred dollars",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_joining_word_only_divides_a_sentence_with_several_clicks() {
+        let words = spoken(0, "Rename this to Talk and Fix Demo");
+        assert_eq!(
+            split_words(&words, &[click(500, "h1")], 0),
+            ["Rename this to Talk and Fix Demo"]
         );
     }
 

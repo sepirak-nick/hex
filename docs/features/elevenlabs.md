@@ -88,7 +88,7 @@ Labs > Talk and click (off)                // labs.talk_and_click; hex labs on t
     │   ├── Agentation's server isn't running -> fails before any upload, naming the command to start it; the words are lost
     │   ├── Audio -> ElevenLabs with word timing, whichever model is selected, and with no local fallback
     │   ├── Each sentence -> the click made while saying it, else the nearest; a click with no words says so
-    │   │   └── Several clicks in one sentence -> divided at its commas and pauses, then by word
+    │   │   └── Several clicks in one sentence -> divided at its commas, pauses, and "and", "but", or "then", then by word
     │   └── One note per click -> Agentation's server on 4747, in the toolbar's session when the page has one
     └── Escape -> nothing is sent; its clicks are dropped by the next dictation
 ```
