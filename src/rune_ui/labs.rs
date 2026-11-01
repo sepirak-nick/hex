@@ -226,6 +226,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 "Meeting speaker labels",
                 "After a meeting, sends the other participants' audio to ElevenLabs to tell them apart. Get their consent first",
             ));
+            rows.push(row(
+                Feature::MeetingSpeakerNames,
+                &WAVE,
+                "Meeting speaker names",
+                "Asks OpenCode to name labeled speakers from the calendar and the conversation. Names can be wrong",
+            ));
         }
     }
     rows.push(row(
@@ -294,6 +300,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::ElevenLabs => "lab-elevenlabs",
         Feature::MeetingSpeakers => "lab-meeting-speakers",
+        Feature::MeetingSpeakerNames => "lab-meeting-speaker-names",
     }
 }
 

@@ -30,6 +30,7 @@ fn rejects_non_numeric_media_times() {
 fn transcript_entries_coalesce_into_source_turns_without_hiding_long_pauses() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source,
         start_ms,
         end_ms,
@@ -58,6 +59,7 @@ fn final_transcript_replaces_the_rolling_transcript_atomically() {
     fs::create_dir_all(&directory).unwrap();
     let rolling = TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source: MeetingSource::Microphone,
         start_ms: 0,
         end_ms: 500,
@@ -78,6 +80,7 @@ fn final_transcript_replaces_the_rolling_transcript_atomically() {
 
     let final_entry = TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source: MeetingSource::Microphone,
         start_ms: 0,
         end_ms: 500,
@@ -114,6 +117,7 @@ fn reading_a_transcript_ignores_an_in_flight_trailing_write() {
     ));
     let complete = TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source: MeetingSource::System,
         start_ms: 0,
         end_ms: 500,
@@ -168,6 +172,7 @@ fn capture_failures_are_persisted_instead_of_looking_interrupted() {
         notes: None,
         notes_error: None,
         speakers_error: None,
+        speaker_names_error: None,
         calendar: None,
         title_source: None,
         chapters: Vec::new(),
@@ -213,6 +218,7 @@ fn mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded() 
         notes: None,
         notes_error: None,
         speakers_error: None,
+        speaker_names_error: None,
         calendar: None,
         title_source: None,
         chapters: Vec::new(),
@@ -477,7 +483,7 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
     fs::remove_dir_all(base).unwrap();
 }
 
-fn retention_manifest(
+pub(super) fn retention_manifest(
     id: &str,
     status: MeetingStatus,
     created_at_ms: u64,
@@ -503,6 +509,7 @@ fn retention_manifest(
         notes: None,
         notes_error: None,
         speakers_error: None,
+        speaker_names_error: None,
         calendar: None,
         title_source: None,
         chapters: Vec::new(),
@@ -578,6 +585,7 @@ fn forever_retention_moves_nothing_and_is_the_default() {
 fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source,
         start_ms,
         end_ms,
@@ -638,6 +646,7 @@ fn paste_cursor_counts_coalesced_turns_and_advances_only_on_success() {
 fn paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source,
         start_ms,
         end_ms,
@@ -701,6 +710,7 @@ fn paste_cursor_neither_repeats_nor_drops_text_when_the_transcript_is_rewritten(
 fn paste_cursor_pastes_text_the_final_pass_recovers_for_skipped_audio() {
     let entry = |start_ms, end_ms, text: &str| TranscriptEntry {
         speaker: None,
+        speaker_name: None,
         source: MeetingSource::System,
         start_ms,
         end_ms,

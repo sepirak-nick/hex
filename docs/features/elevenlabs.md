@@ -59,6 +59,22 @@ participants' consent first: it uploads their voices, with ElevenLabs' default
 logging. Check: `meeting_speakers.rs`; `live_diarization_tells_two_voices_apart`
 uses `HEX_LIVE_DIARIZE_WAV` and a little credit.
 
+### Speaker names
+
+```ts
+Labs > Meeting speaker names (off)         // labs.meeting_speaker_names; hex labs on meeting-speaker-names; meeting_speakers.rs
+├── Needs Meeting speaker labels on, Summarize with OpenCode on, and OpenCode running; otherwise "Speakers weren't named."
+└── On, once speakers are numbered, before publishing
+    ├── Sends the calendar's attendees and up to 12,000 characters of transcript (start and end, your lines included) to the OpenCode notes model, at most 60 s
+    ├── Each speaker gets a name or null -> a name must be well formed, found in the attendees or that transcript, and given to one speaker only
+    └── Anything else, or any failure -> stays Speaker N
+```
+
+Names are inferences and can be wrong, and nothing in a transcript marks them as
+guesses. Without a connected calendar it only has what people say in the call.
+Check: `meeting_speakers.rs`; `live_opencode_names_speakers_and_leaves_the_unsure_one`
+uses `HEX_LIVE_OPENCODE_MODEL`.
+
 ## The key
 
 `ELEVENLABS_API_KEY` wins, then the owner-only `<support>/elevenlabs-api-key`

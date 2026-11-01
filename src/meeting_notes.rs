@@ -835,29 +835,46 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
 #[cfg(any(debug_assertions, test))]
 pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
     let mut entries: Vec<TranscriptEntry> = Vec::new();
+    let mut named: Vec<String> = Vec::new();
     let mut in_turn = false;
     for line in markdown.lines() {
         let header = line
             .strip_prefix("**")
             .and_then(|rest| rest.split_once("** · "))
             .and_then(|(label, clock)| {
-                let (source, speaker) = match label {
-                    "You" => (super::MeetingSource::Microphone, None),
-                    "Them" => (super::MeetingSource::System, None),
-                    label => (
-                        super::MeetingSource::System,
-                        Some(label.strip_prefix("Speaker ")?.parse::<u16>().ok()?),
-                    ),
+                let (source, speaker, name) = match label {
+                    "You" => (super::MeetingSource::Microphone, None, None),
+                    "Them" => (super::MeetingSource::System, None, None),
+                    label => match label.strip_prefix("Speaker ").map(str::parse::<u16>) {
+                        Some(Ok(number)) => (super::MeetingSource::System, Some(number), None),
+                        // A named speaker: numbered as they first appear here.
+                        _ if !label.is_empty() && !label.contains('*') => {
+                            let number = match named.iter().position(|known| known == label) {
+                                Some(index) => index,
+                                None => {
+                                    named.push(label.to_owned());
+                                    named.len() - 1
+                                }
+                            };
+                            (
+                                super::MeetingSource::System,
+                                u16::try_from(number + 1).ok(),
+                                Some(label.to_owned()),
+                            )
+                        }
+                        _ => return None,
+                    },
                 };
                 let (minutes, seconds) = clock.trim().split_once(':')?;
                 let start_ms =
                     (minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?) * 1_000;
-                Some((source, speaker, start_ms))
+                Some((source, speaker, name, start_ms))
             });
-        if let Some((source, speaker, start_ms)) = header {
+        if let Some((source, speaker, speaker_name, start_ms)) = header {
             entries.push(TranscriptEntry {
                 source,
                 speaker,
+                speaker_name,
                 start_ms,
                 end_ms: start_ms,
                 text: String::new(),
@@ -985,9 +1002,21 @@ mod tests {
         assert_eq!(entries[1].source, MeetingSource::System);
     }
 
+    #[test]
+    fn named_speakers_are_read_back_from_markdown() {
+        let entries = entries_from_markdown(
+            "**Priya Shah** · 00:01\nHi.\n\n**Sam** · 00:05\nHey.\n\n**Priya Shah** · 00:09\nBye.\n",
+        );
+        let labels: Vec<_> = entries.iter().map(TranscriptEntry::label).collect();
+        assert_eq!(labels, ["Priya Shah", "Sam", "Priya Shah"]);
+        assert_eq!(entries[0].speaker, entries[2].speaker);
+        assert_ne!(entries[0].speaker, entries[1].speaker);
+    }
+
     fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
             speaker: None,
+            speaker_name: None,
             source,
             start_ms,
             end_ms: start_ms + 1_000,
@@ -1414,6 +1443,7 @@ mod tests {
             [
                 TranscriptEntry {
                     speaker: None,
+                    speaker_name: None,
                     source: MeetingSource::Microphone,
                     start_ms: 1_000,
                     end_ms: 4_000,
@@ -1421,6 +1451,7 @@ mod tests {
                 },
                 TranscriptEntry {
                     speaker: None,
+                    speaker_name: None,
                     source: MeetingSource::System,
                     start_ms: 4_000,
                     end_ms: 4_400,

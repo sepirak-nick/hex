@@ -253,6 +253,7 @@ fn meeting_live_replay() {
         notes: None,
         notes_error: None,
         speakers_error: None,
+        speaker_names_error: None,
         calendar: None,
         title_source: None,
         chapters: Vec::new(),

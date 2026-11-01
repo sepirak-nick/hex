@@ -30,6 +30,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── ElevenLabs transcription no labs.elevenlabs + labs.elevenlabs_fallback (macOS) cloud dictation model; see elevenlabs.md
 ├── Meeting speaker labels no labs.meeting_speakers (macOS) sends a finished meeting's system track to ElevenLabs to tell participants apart; see elevenlabs.md
+├── Meeting speaker names no labs.meeting_speaker_names (macOS) OpenCode names labeled speakers from the calendar and conversation; see elevenlabs.md
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey (macOS)
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
 └── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General)

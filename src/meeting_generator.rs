@@ -199,6 +199,33 @@ pub(crate) fn generate_chapter_lines(
     }
 }
 
+/// Likely names for numbered speakers, as `{"speakers": {"1": "Priya", "2": null}}`.
+/// OpenCode only: Apple's bridge has a fixed set of answer shapes.
+pub(crate) fn generate_speaker_names(
+    instructions: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<std::collections::BTreeMap<String, Option<String>>, GenerationError> {
+    if !(crate::app_settings::meeting_notes_with_opencode() && crate::opencode_service::running()) {
+        return Err(GenerationError::Failed(
+            "Turn on Summarize with OpenCode, and keep OpenCode running, to name speakers".into(),
+        ));
+    }
+    opencode::<GeneratedSpeakerNames>(
+        instructions,
+        prompt,
+        r#"{"speakers": {"1": "Priya", "2": null}}"#,
+        timeout,
+    )
+    .map(|generated| generated.speakers)
+}
+
+#[derive(Deserialize)]
+pub(crate) struct GeneratedSpeakerNames {
+    #[serde(default)]
+    pub(crate) speakers: std::collections::BTreeMap<String, Option<String>>,
+}
+
 /// One OpenCode generation answered as JSON of `shape`.
 fn opencode<T: DeserializeOwned>(
     instructions: &str,
@@ -223,7 +250,7 @@ fn opencode<T: DeserializeOwned>(
 
 /// The JSON object in a model's answer, ignoring code fences or prose
 /// around it.
-fn parse_json<T: DeserializeOwned>(text: &str) -> Result<T, GenerationError> {
+pub(crate) fn parse_json<T: DeserializeOwned>(text: &str) -> Result<T, GenerationError> {
     let start = text.find('{');
     let end = text.rfind('}');
     let object = match (start, end) {

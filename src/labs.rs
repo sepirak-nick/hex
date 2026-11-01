@@ -48,10 +48,11 @@ pub enum Feature {
     SecondDictationShortcut,
     ElevenLabs,
     MeetingSpeakers,
+    MeetingSpeakerNames,
 }
 
 impl Feature {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -73,6 +74,7 @@ impl Feature {
         Self::SecondDictationShortcut,
         Self::ElevenLabs,
         Self::MeetingSpeakers,
+        Self::MeetingSpeakerNames,
     ];
 
     /// The features this OS has.
@@ -93,7 +95,8 @@ impl Feature {
             | Self::CopyOnly
             | Self::SecondDictationShortcut
             | Self::ElevenLabs
-            | Self::MeetingSpeakers => cfg!(target_os = "macos"),
+            | Self::MeetingSpeakers
+            | Self::MeetingSpeakerNames => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -129,6 +132,7 @@ impl Feature {
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::ElevenLabs => "elevenlabs",
             Self::MeetingSpeakers => "meeting-speakers",
+            Self::MeetingSpeakerNames => "meeting-speaker-names",
         }
     }
 
@@ -156,6 +160,7 @@ impl Feature {
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::ElevenLabs => "labs.elevenlabs",
             Self::MeetingSpeakers => "labs.meeting_speakers",
+            Self::MeetingSpeakerNames => "labs.meeting_speaker_names",
         }
     }
 
@@ -208,6 +213,9 @@ impl Feature {
             Self::MeetingSpeakers => {
                 "Tell the other participants apart after a meeting, which sends their audio to ElevenLabs; get their consent first"
             }
+            Self::MeetingSpeakerNames => {
+                "Ask OpenCode to name labeled speakers from the calendar and the conversation; names can be wrong"
+            }
         }
     }
 
@@ -239,6 +247,7 @@ impl Feature {
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::ElevenLabs => settings.labs.elevenlabs,
             Self::MeetingSpeakers => settings.labs.meeting_speakers,
+            Self::MeetingSpeakerNames => settings.labs.meeting_speaker_names,
         }
     }
 
@@ -268,6 +277,7 @@ impl Feature {
                 settings.leave_disabled_cloud_model();
             }
             Self::MeetingSpeakers => settings.labs.meeting_speakers = on,
+            Self::MeetingSpeakerNames => settings.labs.meeting_speaker_names = on,
         }
     }
 }
@@ -288,8 +298,9 @@ const SUBTITLE_EXPORT: u32 = 1 << 11;
 const ELEVENLABS: u32 = 1 << 12;
 const ELEVENLABS_FALLBACK: u32 = 1 << 13;
 const MEETING_SPEAKERS: u32 = 1 << 14;
+const MEETING_SPEAKER_NAMES: u32 = 1 << 15;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 15;
+const MINUTES_SHIFT: u32 = 16;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -397,6 +408,12 @@ pub fn meeting_speakers() -> bool {
     on(MEETING_SPEAKERS)
 }
 
+/// OpenCode names a meeting's labeled speakers (macOS; read as it publishes).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn meeting_speaker_names() -> bool {
+    on(MEETING_SPEAKER_NAMES)
+}
+
 #[cfg(test)]
 thread_local! {
     static ELEVENLABS_FOR_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
@@ -446,6 +463,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.elevenlabs, ELEVENLABS),
         (settings.elevenlabs_fallback, ELEVENLABS_FALLBACK),
         (settings.meeting_speakers, MEETING_SPEAKERS),
+        (settings.meeting_speaker_names, MEETING_SPEAKER_NAMES),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -649,6 +667,10 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & MEETING_SPEAKERS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(state & MEETING_SPEAKER_NAMES, 0);
+        labs.meeting_speaker_names = true;
+        assert_ne!(encode(&labs) & MEETING_SPEAKER_NAMES, 0);
+        assert_eq!(encode(&labs) >> MINUTES_SHIFT, 24 * 60);
     }
 
     #[test]

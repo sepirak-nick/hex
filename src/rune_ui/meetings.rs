@@ -53,6 +53,8 @@ pub(super) struct Turn {
     pub(super) mine: bool,
     /// Which other participant, once labeled (Labs › Meeting speaker labels).
     pub(super) speaker: Option<u16>,
+    /// Their likely name (Labs › Meeting speaker names).
+    pub(super) speaker_name: Option<String>,
     pub(super) start_ms: u64,
     pub(super) text: String,
     /// A silence of 30 s or more before this turn.
@@ -61,10 +63,11 @@ pub(super) struct Turn {
 
 impl Turn {
     fn name(&self) -> String {
-        match (self.mine, self.speaker) {
-            (true, _) => tr("You").into(),
-            (false, Some(speaker)) => format!("Speaker {speaker}"),
-            (false, None) => tr("Them").into(),
+        match (self.mine, &self.speaker_name, self.speaker) {
+            (true, ..) => tr("You").into(),
+            (false, Some(name), _) => name.clone(),
+            (false, None, Some(speaker)) => format!("Speaker {speaker}"),
+            (false, None, None) => tr("Them").into(),
         }
     }
 }
@@ -108,6 +111,7 @@ pub(super) struct Meeting {
     pub(super) export_error: Option<String>,
     pub(super) notes_error: Option<String>,
     pub(super) speakers_error: Option<String>,
+    pub(super) speaker_names_error: Option<String>,
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
@@ -209,10 +213,11 @@ fn transcript_markdown(turns: &[Turn]) -> String {
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                match (turn.mine, turn.speaker) {
-                    (true, _) => "You".to_owned(),
-                    (false, Some(speaker)) => format!("Speaker {speaker}"),
-                    (false, None) => "Them".to_owned(),
+                match (turn.mine, &turn.speaker_name, turn.speaker) {
+                    (true, ..) => "You".to_owned(),
+                    (false, Some(name), _) => name.clone(),
+                    (false, None, Some(speaker)) => format!("Speaker {speaker}"),
+                    (false, None, None) => "Them".to_owned(),
                 },
                 clock_offset(turn.start_ms),
                 turn.text.trim()
@@ -284,6 +289,7 @@ impl MeetingsPane {
     pub(super) fn fixture() -> Self {
         let turn = |mine, seconds: u64, text: &str| Turn {
             speaker: None,
+            speaker_name: None,
             mine,
             start_ms: seconds * 1_000,
             text: text.into(),
@@ -342,6 +348,7 @@ impl MeetingsPane {
                 export_error: None,
                 notes_error: None,
                 speakers_error: None,
+                speaker_names_error: None,
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
@@ -925,6 +932,10 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             .speakers_error
             .as_deref()
             .map(|error| ("speakers-error", "Speakers weren't labeled.", error)),
+        meeting
+            .speaker_names_error
+            .as_deref()
+            .map(|error| ("speaker-names-error", "Speakers weren't named.", error)),
         meeting
             .live_error
             .as_deref()

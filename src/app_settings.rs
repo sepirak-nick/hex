@@ -1374,6 +1374,9 @@ pub struct LabsSettings {
     /// A finished meeting's system track goes to ElevenLabs to tell the other
     /// participants apart (macOS). The user collects their consent first.
     pub meeting_speakers: bool,
+    /// OpenCode names labeled speakers from the calendar and conversation
+    /// (macOS). Needs `meeting_speakers` and Summarize with OpenCode.
+    pub meeting_speaker_names: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1399,6 +1402,7 @@ impl Default for LabsSettings {
             elevenlabs: false,
             elevenlabs_fallback: true,
             meeting_speakers: false,
+            meeting_speaker_names: false,
         }
     }
 }

@@ -348,6 +348,11 @@ const KEYS: &[Key] = &[
         "Labs: tell the other participants apart after a meeting, which sends their audio to ElevenLabs (macOS)",
     ),
     key(
+        "labs.meeting_speaker_names",
+        Kind::Bool,
+        "Labs: ask OpenCode to name labeled speakers from the calendar and the conversation (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -544,6 +549,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
     ("labs.meeting_speakers", "meetings"),
+    ("labs.meeting_speaker_names", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("keyboard_model_switching.", "keyboard_model_switching"),

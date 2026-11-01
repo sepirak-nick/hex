@@ -206,6 +206,7 @@ struct Passage {
     text: String,
     tokens: Vec<Token>,
     frequencies: HashMap<String, u32>,
+    speaker_name: Option<String>,
 }
 
 struct Token {
@@ -227,10 +228,14 @@ impl Passage {
             text,
             tokens,
             frequencies,
+            speaker_name: None,
         }
     }
 
     fn speaker(&self) -> String {
+        if let Some(name) = &self.speaker_name {
+            return name.clone();
+        }
         match self.kind {
             PassageKind::Speech(MeetingSource::System, Some(speaker)) => {
                 format!("Speaker {speaker}")
@@ -806,12 +811,24 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Source, speaker number and name, start, end, words, and text of a passage
+/// being built.
+type PassageGroup = (
+    MeetingSource,
+    Option<u16>,
+    Option<String>,
+    u64,
+    u64,
+    usize,
+    String,
+);
+
 fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Passage> {
-    let mut groups: Vec<(MeetingSource, Option<u16>, u64, u64, usize, String)> = Vec::new();
+    let mut groups: Vec<PassageGroup> = Vec::new();
     for entry in entries {
         let text = entry.text.trim();
         let words = text.split_whitespace().count();
-        if let Some((source, speaker, _, end, count, joined)) = groups.last_mut()
+        if let Some((source, speaker, _, _, end, count, joined)) = groups.last_mut()
             && *source == entry.source
             && *speaker == entry.speaker
             && entry.start_ms.saturating_sub(*end) <= TURN_GAP_MS
@@ -825,6 +842,7 @@ fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Pass
             groups.push((
                 entry.source,
                 entry.speaker,
+                entry.speaker_name.clone(),
                 entry.start_ms,
                 entry.end_ms,
                 words,
@@ -834,8 +852,9 @@ fn passages(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> Vec<Pass
     }
     let mut passages = groups
         .into_iter()
-        .map(|(source, speaker, start, _, _, text)| {
-            Passage::new(PassageKind::Speech(source, speaker), start, text)
+        .map(|(source, speaker, name, start, _, _, text)| Passage {
+            speaker_name: name,
+            ..Passage::new(PassageKind::Speech(source, speaker), start, text)
         })
         .collect::<Vec<_>>();
     if let Some(notes) = &manifest.notes {

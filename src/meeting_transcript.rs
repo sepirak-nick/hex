@@ -255,6 +255,7 @@ impl TrackTranscript {
                     let end = (segment.end_ms.max(0) as u64).min(duration_ms);
                     (!text.is_empty() && end > start).then(|| TranscriptEntry {
                         speaker: None,
+                        speaker_name: None,
                         source: self.source,
                         start_ms: chunk_ms + start,
                         end_ms: chunk_ms + end,
@@ -267,6 +268,7 @@ impl TrackTranscript {
             (!text.is_empty())
                 .then(|| TranscriptEntry {
                     speaker: None,
+                    speaker_name: None,
                     source: self.source,
                     start_ms: chunk_ms,
                     end_ms: chunk_ms + duration_ms,
@@ -384,6 +386,7 @@ impl TrackTranscript {
             let group = words.drain(..group.len()).collect::<Vec<_>>();
             self.entries.push(TranscriptEntry {
                 speaker: None,
+                speaker_name: None,
                 source: self.source,
                 start_ms: group[0].start_ms as u64,
                 end_ms: group
@@ -2307,6 +2310,7 @@ mod tests {
     fn entry(source: MeetingSource, start_ms: u64, end_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
             speaker: None,
+            speaker_name: None,
             source,
             start_ms,
             end_ms,

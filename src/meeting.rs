@@ -168,6 +168,9 @@ pub struct MeetingManifest {
     /// Why Labs › Meeting speaker labels couldn't label this meeting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speakers_error: Option<String>,
+    /// Why Labs › Meeting speaker names couldn't name this meeting's speakers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_names_error: Option<String>,
     /// The calendar event the recording was started for, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar: Option<MeetingCalendar>,
@@ -276,11 +279,18 @@ pub struct TranscriptEntry {
     /// labels), numbered from 1. `None` is plain `You` or `Them`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker: Option<u16>,
+    /// That speaker's likely name (Labs › Meeting speaker names), inferred from
+    /// the calendar and the conversation, so it can be wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_name: Option<String>,
 }
 
 impl TranscriptEntry {
     /// Who said this, as transcripts show it.
     pub fn label(&self) -> String {
+        if let Some(name) = &self.speaker_name {
+            return name.clone();
+        }
         match (self.source, self.speaker) {
             (MeetingSource::System, Some(speaker)) => format!("Speaker {speaker}"),
             (source, _) => source.label().into(),
@@ -436,6 +446,7 @@ pub fn record(
         notes: None,
         notes_error: None,
         speakers_error: None,
+        speaker_names_error: None,
         calendar: start.calendar,
         title_source: None,
         chapters: Vec::new(),
@@ -844,6 +855,13 @@ fn transcribe(
         Ok(()) => None,
         Err(error) => {
             tracing::warn!(%error, "could not label meeting speakers");
+            Some(error.to_string())
+        }
+    };
+    manifest.speaker_names_error = match speakers::name(manifest, &mut transcript) {
+        Ok(()) => None,
+        Err(error) => {
+            tracing::warn!(%error, "could not name meeting speakers");
             Some(error.to_string())
         }
     };
