@@ -1344,6 +1344,7 @@ mod tests {
 
     fn call() -> Vec<TranscriptEntry> {
         let entry = |source, start_ms, text: &str| TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms: start_ms + 2_000,

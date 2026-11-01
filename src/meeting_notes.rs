@@ -131,11 +131,7 @@ pub(super) fn excerpt_budget(context_tokens: usize, cap: usize) -> usize {
 fn transcript_lines(entries: &[TranscriptEntry]) -> Vec<String> {
     let mut lines = Vec::new();
     for turn in coalesce_transcript(entries.iter().cloned()) {
-        let prefix = format!(
-            "[{}] {}: ",
-            format_duration(turn.start_ms),
-            turn.source.label()
-        );
+        let prefix = format!("[{}] {}: ", format_duration(turn.start_ms), turn.label());
         let mut line = prefix.clone();
         for word in turn.text.split_whitespace() {
             if line.len() > prefix.len() && line.len() + 1 + word.len() > LINE_CHARS {
@@ -845,19 +841,23 @@ pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
             .strip_prefix("**")
             .and_then(|rest| rest.split_once("** · "))
             .and_then(|(label, clock)| {
-                let source = match label {
-                    "You" => super::MeetingSource::Microphone,
-                    "Them" => super::MeetingSource::System,
-                    _ => return None,
+                let (source, speaker) = match label {
+                    "You" => (super::MeetingSource::Microphone, None),
+                    "Them" => (super::MeetingSource::System, None),
+                    label => (
+                        super::MeetingSource::System,
+                        Some(label.strip_prefix("Speaker ")?.parse::<u16>().ok()?),
+                    ),
                 };
                 let (minutes, seconds) = clock.trim().split_once(':')?;
                 let start_ms =
                     (minutes.parse::<u64>().ok()? * 60 + seconds.parse::<u64>().ok()?) * 1_000;
-                Some((source, start_ms))
+                Some((source, speaker, start_ms))
             });
-        if let Some((source, start_ms)) = header {
+        if let Some((source, speaker, start_ms)) = header {
             entries.push(TranscriptEntry {
                 source,
+                speaker,
                 start_ms,
                 end_ms: start_ms,
                 text: String::new(),
@@ -975,8 +975,19 @@ mod tests {
     use super::*;
     use crate::meeting::MeetingSource;
 
+    #[test]
+    fn labeled_speakers_are_read_back_from_markdown() {
+        let entries = entries_from_markdown(
+            "**You** · 00:01\nHello.\n\n**Speaker 2** · 00:05\nHi.\n\n**Them** · 00:09\nBye.\n",
+        );
+        let labels: Vec<_> = entries.iter().map(TranscriptEntry::label).collect();
+        assert_eq!(labels, ["You", "Speaker 2", "Them"]);
+        assert_eq!(entries[1].source, MeetingSource::System);
+    }
+
     fn entry(source: MeetingSource, start_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms: start_ms + 1_000,
@@ -1402,12 +1413,14 @@ mod tests {
             entries,
             [
                 TranscriptEntry {
+                    speaker: None,
                     source: MeetingSource::Microphone,
                     start_ms: 1_000,
                     end_ms: 4_000,
                     text: "Hi.".into()
                 },
                 TranscriptEntry {
+                    speaker: None,
                     source: MeetingSource::System,
                     start_ms: 4_000,
                     end_ms: 4_400,

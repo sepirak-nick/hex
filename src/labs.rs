@@ -47,10 +47,11 @@ pub enum Feature {
     SubtitleExport,
     SecondDictationShortcut,
     ElevenLabs,
+    MeetingSpeakers,
 }
 
 impl Feature {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -71,6 +72,7 @@ impl Feature {
         Self::SubtitleExport,
         Self::SecondDictationShortcut,
         Self::ElevenLabs,
+        Self::MeetingSpeakers,
     ];
 
     /// The features this OS has.
@@ -90,7 +92,8 @@ impl Feature {
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::SecondDictationShortcut
-            | Self::ElevenLabs => cfg!(target_os = "macos"),
+            | Self::ElevenLabs
+            | Self::MeetingSpeakers => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -125,6 +128,7 @@ impl Feature {
             Self::SubtitleExport => "subtitle-export",
             Self::SecondDictationShortcut => "second-dictation-shortcut",
             Self::ElevenLabs => "elevenlabs",
+            Self::MeetingSpeakers => "meeting-speakers",
         }
     }
 
@@ -151,6 +155,7 @@ impl Feature {
             Self::SubtitleExport => "labs.subtitle_export",
             Self::SecondDictationShortcut => "labs.second_dictation_shortcut",
             Self::ElevenLabs => "labs.elevenlabs",
+            Self::MeetingSpeakers => "labs.meeting_speakers",
         }
     }
 
@@ -200,6 +205,9 @@ impl Feature {
             Self::ElevenLabs => {
                 "Offer ElevenLabs Scribe as a cloud model, which sends dictation audio to ElevenLabs"
             }
+            Self::MeetingSpeakers => {
+                "Tell the other participants apart after a meeting, which sends their audio to ElevenLabs; get their consent first"
+            }
         }
     }
 
@@ -230,6 +238,7 @@ impl Feature {
             Self::SubtitleExport => settings.labs.subtitle_export,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::ElevenLabs => settings.labs.elevenlabs,
+            Self::MeetingSpeakers => settings.labs.meeting_speakers,
         }
     }
 
@@ -258,6 +267,7 @@ impl Feature {
                 settings.labs.elevenlabs = on;
                 settings.leave_disabled_cloud_model();
             }
+            Self::MeetingSpeakers => settings.labs.meeting_speakers = on,
         }
     }
 }
@@ -277,8 +287,9 @@ const FILLER_WORDS: u32 = 1 << 10;
 const SUBTITLE_EXPORT: u32 = 1 << 11;
 const ELEVENLABS: u32 = 1 << 12;
 const ELEVENLABS_FALLBACK: u32 = 1 << 13;
+const MEETING_SPEAKERS: u32 = 1 << 14;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 14;
+const MINUTES_SHIFT: u32 = 15;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -379,6 +390,13 @@ pub fn elevenlabs_fallback() -> bool {
     on(ELEVENLABS_FALLBACK)
 }
 
+/// A finished meeting's system track goes to ElevenLabs to tell the other
+/// participants apart (macOS; read as each meeting publishes).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn meeting_speakers() -> bool {
+    on(MEETING_SPEAKERS)
+}
+
 #[cfg(test)]
 thread_local! {
     static ELEVENLABS_FOR_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
@@ -427,6 +445,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.subtitle_export, SUBTITLE_EXPORT),
         (settings.elevenlabs, ELEVENLABS),
         (settings.elevenlabs_fallback, ELEVENLABS_FALLBACK),
+        (settings.meeting_speakers, MEETING_SPEAKERS),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -617,6 +636,18 @@ mod tests {
         let state = encode(&labs);
         assert_ne!(state & ELEVENLABS, 0);
         assert_eq!(state & SUBTITLE_EXPORT, 0);
+        assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn meeting_speakers_is_its_own_bit_below_the_minutes_and_off_by_default() {
+        let mut labs = LabsSettings::default();
+        assert_eq!(encode(&labs) & MEETING_SPEAKERS, 0);
+        assert!(!meeting_speakers());
+        labs.meeting_speakers = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode(&labs);
+        assert_ne!(state & MEETING_SPEAKERS, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
     }
 

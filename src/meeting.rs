@@ -54,6 +54,8 @@ pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
 pub use chapters::section_for_id;
 pub use chapters::{Chapter, chapter_entries, section_markdown};
+#[path = "meeting_speakers.rs"]
+mod speakers;
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use notes::{summarize, summarize_file};
@@ -163,6 +165,9 @@ pub struct MeetingManifest {
     pub notes: Option<MeetingNotes>,
     #[serde(default)]
     pub notes_error: Option<String>,
+    /// Why Labs › Meeting speaker labels couldn't label this meeting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers_error: Option<String>,
     /// The calendar event the recording was started for, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar: Option<MeetingCalendar>,
@@ -267,6 +272,20 @@ pub struct TranscriptEntry {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    /// Which of the other participants this is (Labs › Meeting speaker
+    /// labels), numbered from 1. `None` is plain `You` or `Them`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<u16>,
+}
+
+impl TranscriptEntry {
+    /// Who said this, as transcripts show it.
+    pub fn label(&self) -> String {
+        match (self.source, self.speaker) {
+            (MeetingSource::System, Some(speaker)) => format!("Speaker {speaker}"),
+            (source, _) => source.label().into(),
+        }
+    }
 }
 
 pub fn coalesce_transcript(
@@ -276,6 +295,7 @@ pub fn coalesce_transcript(
     for entry in entries {
         if let Some(turn) = turns.last_mut()
             && turn.source == entry.source
+            && turn.speaker == entry.speaker
             && entry.start_ms.saturating_sub(turn.end_ms) <= TRANSCRIPT_TURN_GAP_MS
         {
             if !turn.text.ends_with(char::is_whitespace) {
@@ -415,6 +435,7 @@ pub fn record(
         provisional_title: None,
         notes: None,
         notes_error: None,
+        speakers_error: None,
         calendar: start.calendar,
         title_source: None,
         chapters: Vec::new(),
@@ -815,9 +836,17 @@ fn transcribe(
     selection: &crate::transcription_models::TranscriptionSelection,
     rolling: Option<transcript::RollingOutcome>,
 ) -> Result<()> {
-    let (transcript, echo_suppressed) =
+    let (mut transcript, echo_suppressed) =
         transcript::transcribe(directory, manifest, selection, rolling)?;
     manifest.echo_suppressed_utterances = echo_suppressed;
+    manifest.speakers_error = match speakers::label(directory, manifest, selection, &mut transcript)
+    {
+        Ok(()) => None,
+        Err(error) => {
+            tracing::warn!(%error, "could not label meeting speakers");
+            Some(error.to_string())
+        }
+    };
     // Transcription takes a while; the headings use a rename made meanwhile.
     keep_rename(directory, manifest);
 
@@ -1043,7 +1072,7 @@ pub fn transcript_markdown(entries: &[TranscriptEntry]) -> String {
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                turn.source.label(),
+                turn.label(),
                 format_duration(turn.start_ms),
                 turn.text.trim()
             )
@@ -1224,7 +1253,7 @@ fn markdown_line(entry: &TranscriptEntry) -> String {
     format!(
         "**{} {}**  {}",
         format_duration(entry.start_ms),
-        entry.source.label(),
+        entry.label(),
         entry.text
     )
 }
@@ -1341,7 +1370,7 @@ pub fn format_meeting_delta(entries: &[TranscriptEntry]) -> Result<String> {
     }
     Ok(coalesce_transcript(entries.iter().cloned())
         .into_iter()
-        .map(|entry| format!("{}: {}", entry.source.label(), entry.text))
+        .map(|entry| format!("{}: {}", entry.label(), entry.text))
         .collect::<Vec<_>>()
         .join("\n\n"))
 }

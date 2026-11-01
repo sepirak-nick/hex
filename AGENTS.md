@@ -139,7 +139,8 @@ substitute for source inspection or a second roadmap.
   then an owner-only file), in-memory WAV, and a curl upload that Escape, job
   deadlines, and quitting kill. Only `WarmTranscriber::transcribe_dictation`
   calls it, falling back to the last local model when ElevenLabs is unreachable;
-  everything else uses `app_settings::local_transcription_selection`. See
+  everything else uses `app_settings::local_transcription_selection`. `diarize`
+  serves Labs › Meeting speaker labels from a temporary file. See
   [`docs/features/elevenlabs.md`](docs/features/elevenlabs.md).
 - `transcription_engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
@@ -772,10 +773,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   Printed and Paste Last skips it.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
-- Only press-to-paste dictation may leave this Mac, and only with Labs ›
-  ElevenLabs transcription on and its model selected. Meetings, Annotate,
-  `/dictations`, and the rest of the local API stay local whatever is selected;
-  `Transcriber::transcribe` and `transcribe_segments` refuse a cloud model.
+- Only two things may upload to ElevenLabs. Press-to-paste dictation, with Labs ›
+  ElevenLabs transcription on and its model selected. And a finished meeting's
+  system track, never its microphone track, once, with Labs › Meeting speaker
+  labels on, to label the local transcript (`meeting_speakers`). Meeting
+  transcription, Annotate, `/dictations`, and the rest of the local API stay
+  local whatever is selected; `Transcriber::transcribe` and `transcribe_segments`
+  refuse a cloud model.
 - Do not persist captured audio by default. Explicit foreground meeting
   recording must remain visibly active. Diagnostic dictation retention is an
   explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.

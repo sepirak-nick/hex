@@ -165,6 +165,7 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
         error: manifest.error.clone(),
         export_error: manifest.export_error.clone(),
         notes_error: manifest.notes_error.clone(),
+        speakers_error: manifest.speakers_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
         transcript,
         // Sections come from the transcript lines, not the merged turns, as
@@ -194,6 +195,7 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
             previous_end = Some(previous_end.map_or(turn.end_ms, |end| end.max(turn.end_ms)));
             Turn {
                 mine: turn.source == crate::meeting::MeetingSource::Microphone,
+                speaker: turn.speaker,
                 start_ms: turn.start_ms,
                 text: turn.text,
                 pause_before_ms,
@@ -261,6 +263,7 @@ mod tests {
         // One speaker's two lines join into one turn across the boundary
         // at 06:30; the second line belongs to the chapter after.
         let line = |start_ms: u64, end_ms: u64, text: &str| crate::meeting::TranscriptEntry {
+            speaker: None,
             source: crate::meeting::MeetingSource::Microphone,
             start_ms,
             end_ms,

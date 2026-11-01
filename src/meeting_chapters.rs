@@ -407,7 +407,7 @@ pub(super) fn pass_window(
             format!(
                 "[{}] {}: {}",
                 format_duration(turn.start_ms),
-                turn.source.label(),
+                turn.label(),
                 truncate_words(turn.text.trim(), max_chars)
             )
         })
@@ -697,7 +697,7 @@ fn sections(entries: &[TranscriptEntry], chapters: &[Chapter], max_chars: usize)
                         "L{} [{}] {}: {}",
                         index + 1,
                         format_duration(entry.start_ms),
-                        entry.source.label(),
+                        entry.label(),
                         truncate_words(entry.text.trim(), REFINE_LINE_CHARS)
                     ),
                 })

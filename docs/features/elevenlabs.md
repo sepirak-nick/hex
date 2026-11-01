@@ -25,7 +25,7 @@ Dictation with the model selected          // transcription::WarmTranscriber::tr
 └── 401, 403, 4xx -> the dictation fails visibly and its clip is lost, so a bad key can't quietly run locally
 
 Stays on this Mac whatever is selected     // app_settings::local_transcription_selection
-├── Meetings, including the final pass and recovery
+├── Meeting transcription, including the final pass and recovery (speaker labels below are a separate opt-in)
 ├── Annotate captures (each one loads the local model into the engine, evicting the cloud model)
 ├── /dictations from other apps
 ├── /transcriptions and /models/<id>/prepare -> the model is rejected; /models leaves it out
@@ -34,6 +34,30 @@ Stays on this Mac whatever is selected     // app_settings::local_transcription_
 
 Without a local model downloaded, those features report that their model isn't
 installed rather than uploading.
+
+## Meeting speaker labels
+
+```ts
+Labs > Meeting speaker labels (off)        // labs.meeting_speakers; hex labs on meeting-speakers; meeting_speakers.rs
+├── Off -> nothing is uploaded; other participants are all Them
+└── On, as a meeting publishes, whichever speech model it used
+    ├── Nobody else spoke -> nothing is uploaded
+    ├── system.wav -> a temporary owner-only 16 kHz file -> ElevenLabs once with diarize=true -> file removed. Never the microphone track
+    ├── Each Them line gets the speaker with the most overlapping words -> Speaker 1, Speaker 2, by who spoke first
+    │   ├── One speaker found -> stays Them
+    │   └── A line no words overlap -> stays Them
+    └── No key, no connection, a rejected request, or quitting -> publishes with Them; speakers_error shows "Speakers weren't labeled."
+```
+
+Hex's local transcript stays the text. ElevenLabs' words are only used for timing,
+so a line where two people spoke goes to whoever spoke more of it. Labels appear
+in the Meetings pane, the Markdown copy, `hex meetings`, subtitles, the notes and
+chapter prompts, and `hex mcp`. Publication waits for the upload, at most 120 s
+plus the meeting's length; the rolling transcript stays readable meanwhile. Labels
+are per meeting, so Speaker 1 in one isn't the same person in another. Collect
+participants' consent first: it uploads their voices, with ElevenLabs' default
+logging. Check: `meeting_speakers.rs`; `live_diarization_tells_two_voices_apart`
+uses `HEX_LIVE_DIARIZE_WAV` and a little credit.
 
 ## The key
 

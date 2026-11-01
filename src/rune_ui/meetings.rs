@@ -51,10 +51,22 @@ impl Status {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Turn {
     pub(super) mine: bool,
+    /// Which other participant, once labeled (Labs › Meeting speaker labels).
+    pub(super) speaker: Option<u16>,
     pub(super) start_ms: u64,
     pub(super) text: String,
     /// A silence of 30 s or more before this turn.
     pub(super) pause_before_ms: Option<u64>,
+}
+
+impl Turn {
+    fn name(&self) -> String {
+        match (self.mine, self.speaker) {
+            (true, _) => tr("You").into(),
+            (false, Some(speaker)) => format!("Speaker {speaker}"),
+            (false, None) => tr("Them").into(),
+        }
+    }
 }
 
 /// One topic of a meeting (Labs), from `start_ms` to
@@ -95,6 +107,7 @@ pub(super) struct Meeting {
     pub(super) error: Option<String>,
     pub(super) export_error: Option<String>,
     pub(super) notes_error: Option<String>,
+    pub(super) speakers_error: Option<String>,
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
     pub(super) chapters: Vec<Chapter>,
@@ -196,7 +209,11 @@ fn transcript_markdown(turns: &[Turn]) -> String {
         .map(|turn| {
             format!(
                 "**{}** · {}\n{}",
-                if turn.mine { "You" } else { "Them" },
+                match (turn.mine, turn.speaker) {
+                    (true, _) => "You".to_owned(),
+                    (false, Some(speaker)) => format!("Speaker {speaker}"),
+                    (false, None) => "Them".to_owned(),
+                },
                 clock_offset(turn.start_ms),
                 turn.text.trim()
             )
@@ -266,6 +283,7 @@ impl MeetingsPane {
     /// One recording, one with notes, one without, and one that failed.
     pub(super) fn fixture() -> Self {
         let turn = |mine, seconds: u64, text: &str| Turn {
+            speaker: None,
             mine,
             start_ms: seconds * 1_000,
             text: text.into(),
@@ -323,6 +341,7 @@ impl MeetingsPane {
                 error: None,
                 export_error: None,
                 notes_error: None,
+                speakers_error: None,
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
                 chapters: Vec::new(),
@@ -903,6 +922,10 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             .filter(|_| !meeting.notes_running)
             .map(|error| ("notes-error", tr("Notes could not be written."), error)),
         meeting
+            .speakers_error
+            .as_deref()
+            .map(|error| ("speakers-error", "Speakers weren't labeled.", error)),
+        meeting
             .live_error
             .as_deref()
             .filter(|_| active)
@@ -1187,7 +1210,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn) -> Vec<El> {
                     .key("speaker")
                     .gap(8.0)
                     .child(
-                        text(if turn.mine { tr("You") } else { tr("Them") })
+                        text(turn.name())
                             .key("name")
                             .font(p.k.ty.small_medium)
                             .color(if turn.mine { p.text() } else { p.faint() }),

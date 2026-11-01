@@ -220,6 +220,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 "ElevenLabs transcription",
                 "Adds a cloud speech model that sends dictation audio to ElevenLabs",
             ));
+            rows.push(row(
+                Feature::MeetingSpeakers,
+                &WAVE,
+                "Meeting speaker labels",
+                "After a meeting, sends the other participants' audio to ElevenLabs to tell them apart. Get their consent first",
+            ));
         }
     }
     rows.push(row(
@@ -287,6 +293,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
         Feature::ElevenLabs => "lab-elevenlabs",
+        Feature::MeetingSpeakers => "lab-meeting-speakers",
     }
 }
 

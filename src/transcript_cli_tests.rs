@@ -495,18 +495,21 @@ fn subtitles_render_speaker_turns_as_srt_and_vtt_cues() {
     use crate::meeting::{MeetingSource, TranscriptEntry};
     let entries = [
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::Microphone,
             start_ms: 5_500,
             end_ms: 8_000,
             text: "Hello <there> & welcome.".into(),
         },
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::System,
             start_ms: 3_725_042,
             end_ms: 3_725_000,
             text: "First line\n\n  \nsecond --> line".into(),
         },
         TranscriptEntry {
+            speaker: None,
             source: MeetingSource::System,
             start_ms: 3_800_000,
             end_ms: 3_801_000,

@@ -1371,6 +1371,9 @@ pub struct LabsSettings {
     /// A dictation ElevenLabs can't be reached for runs on the last local
     /// model instead.
     pub elevenlabs_fallback: bool,
+    /// A finished meeting's system track goes to ElevenLabs to tell the other
+    /// participants apart (macOS). The user collects their consent first.
+    pub meeting_speakers: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1395,6 +1398,7 @@ impl Default for LabsSettings {
             second_dictation_shortcut: false,
             elevenlabs: false,
             elevenlabs_fallback: true,
+            meeting_speakers: false,
         }
     }
 }

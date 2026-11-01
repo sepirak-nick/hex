@@ -4,7 +4,9 @@
 //! and killing the child ends an upload at once, which is what Escape needs.
 //! The key reaches curl through its environment and the audio through stdin,
 //! so neither shows in `ps` nor touches the disk. Only dictation calls
-//! [`ElevenLabs::transcribe`]; see `Transcriber::transcribe_dictation`.
+//! [`ElevenLabs::transcribe`]; see `Transcriber::transcribe_dictation`. The one
+//! other upload is [`diarize`], Labs › Meeting speaker labels' system track,
+//! which is sent from its temporary file because a meeting is long.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Cursor, Read, Write};
@@ -36,7 +38,7 @@ const CONNECT_TIMEOUT_SECONDS: u64 = 5;
 const BASE_TIMEOUT_SECONDS: u64 = 20;
 /// Far larger than any transcript a dictation produces; curl and the reader
 /// both hold a response to it.
-const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 4 * 1024;
 const POLL: Duration = Duration::from_millis(25);
 
@@ -132,13 +134,15 @@ impl ElevenLabs {
             model_id: self.model_id,
             language: &self.selection.language,
             timeout_seconds: timeout_seconds(samples.len()),
+            file: None,
+            diarize: false,
         };
         let stop = || {
             cancelled.load(Ordering::Acquire)
                 || crate::gguf_session::job_cancel().is_some_and(|cancel| cancel.is_cancelled())
                 || crate::process_exit::quitting()
         };
-        let result = post(&request, &key, audio, stop);
+        let result = post(&request, &key, audio, stop).and_then(|body| parse_transcript(&body));
         tracing::info!(
             upload_ms = started.elapsed().as_millis() as u64,
             audio_ms = samples.len() as u64 / 16,
@@ -147,6 +151,52 @@ impl ElevenLabs {
         );
         result
     }
+}
+
+/// Who spoke one stretch of a track, in ms from its start.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpeakerSpan {
+    pub speaker: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+/// Uploads a 16 kHz track of `samples` samples and returns who spoke when.
+pub fn diarize(
+    track: &Path,
+    language: &str,
+    samples: usize,
+    stop: impl Fn() -> bool,
+) -> std::result::Result<Vec<SpeakerSpan>, UploadError> {
+    let key = read_key()
+        .map_err(|error| UploadError::Rejected(error.to_string()))?
+        .ok_or_else(|| {
+            UploadError::Rejected("Add an ElevenLabs API key to label meeting speakers".into())
+        })?;
+    let started = Instant::now();
+    let request = Request {
+        url: ENDPOINT,
+        protocols: "=https",
+        model_id: "scribe_v2",
+        language,
+        timeout_seconds: diarize_timeout_seconds(samples),
+        file: Some(track),
+        diarize: true,
+    };
+    let result = post(&request, &key, Vec::new(), stop).and_then(|body| parse_spans(&body));
+    tracing::info!(
+        upload_ms = started.elapsed().as_millis() as u64,
+        audio_ms = samples as u64 / 16,
+        ok = result.is_ok(),
+        "elevenlabs diarization"
+    );
+    result
+}
+
+/// Sending and processing a whole meeting. Unlike a dictation, nobody is
+/// waiting at the keyboard, so it can take about the meeting's own length.
+fn diarize_timeout_seconds(samples: usize) -> u64 {
+    120 + (samples as u64).div_ceil(u64::from(SAMPLE_RATE))
 }
 
 /// The whole upload's limit: a slow connection may need about the clip's own
@@ -283,6 +333,10 @@ struct Request<'a> {
     model_id: &'a str,
     language: &'a str,
     timeout_seconds: u64,
+    /// Upload this file instead of stdin.
+    file: Option<&'a Path>,
+    /// Ask who speaks each word, which needs word timestamps.
+    diarize: bool,
 }
 
 /// Everything curl is told on its command line, which any process on this Mac
@@ -312,7 +366,11 @@ fn curl_arguments(request: &Request<'_>) -> Vec<String> {
         "--form-string",
         "tag_audio_events=false",
         "--form-string",
-        "timestamps_granularity=none",
+        if request.diarize {
+            "timestamps_granularity=word"
+        } else {
+            "timestamps_granularity=none"
+        },
     ]
     .map(str::to_owned)
     .into();
@@ -320,10 +378,22 @@ fn curl_arguments(request: &Request<'_>) -> Vec<String> {
         arguments.push("--form-string".into());
         arguments.push(format!("language_code={}", request.language));
     }
+    if request.diarize {
+        arguments.push("--form-string".into());
+        arguments.push("diarize=true".into());
+    }
+    let source = request.file.map_or_else(
+        || "-".to_owned(),
+        |file| {
+            // Curl's own quoting, so no path can add form options.
+            let path = file.to_string_lossy();
+            format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+        },
+    );
     arguments.extend(
         [
             "--form",
-            "file=@-;filename=audio.wav;type=audio/wav",
+            &format!("file=@{source};filename=audio.wav;type=audio/wav"),
             "--write-out",
             "\n%{http_code}",
             request.url,
@@ -333,14 +403,15 @@ fn curl_arguments(request: &Request<'_>) -> Vec<String> {
     arguments
 }
 
-/// Runs curl until it answers, or `stop` says to give up, which kills it.
+/// Runs curl until it answers, returning a successful answer's body, or until
+/// `stop` says to give up, which kills it.
 /// No `--location`: a redirect can't carry the key anywhere else.
 fn post(
     request: &Request<'_>,
     key: &str,
     audio: Vec<u8>,
     stop: impl Fn() -> bool,
-) -> std::result::Result<String, UploadError> {
+) -> std::result::Result<Vec<u8>, UploadError> {
     if stop() {
         return Err(UploadError::Cancelled);
     }
@@ -349,19 +420,24 @@ fn post(
     let mut child = command
         .args(curl_arguments(request))
         .env(CURL_KEY_VARIABLE, key)
-        .stdin(Stdio::piped())
+        .stdin(if request.file.is_some() {
+            Stdio::null()
+        } else {
+            Stdio::piped()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| unreachable(&format_args!("could not start curl: {error}")))?;
-    let stdin = child.stdin.take().expect("stdin is piped");
+    let stdin = child.stdin.take();
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
     // Each pipe has its own thread: a full pipe would otherwise hold curl
     // until its timeout. A killed curl closes them all, so these all end.
     let writer = thread::spawn(move || {
-        let mut stdin = stdin;
-        let _ = stdin.write_all(&audio);
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(&audio);
+        }
     });
     let output = thread::spawn(move || read_bounded(stdout, MAX_RESPONSE_BYTES));
     let errors = thread::spawn(move || read_bounded(stderr, MAX_ERROR_BYTES));
@@ -396,7 +472,7 @@ fn post(
             detail.trim()
         )));
     }
-    parse_response(&output)
+    response_body(&output).map(<[u8]>::to_vec)
 }
 
 /// Keeps at most `limit` bytes and goes on draining, so curl never blocks.
@@ -417,7 +493,7 @@ fn read_bounded(mut pipe: impl Read, limit: usize) -> Vec<u8> {
 /// The body, then the status on the last line (`--write-out`). Errors go by
 /// status alone: ElevenLabs' documented error bodies disagree, and they never
 /// reach a log or the window.
-fn parse_response(output: &[u8]) -> std::result::Result<String, UploadError> {
+fn response_body(output: &[u8]) -> std::result::Result<&[u8], UploadError> {
     let split = output.iter().rposition(|byte| *byte == b'\n');
     let (body, status) = match split {
         Some(split) => (&output[..split], &output[split + 1..]),
@@ -428,7 +504,7 @@ fn parse_response(output: &[u8]) -> std::result::Result<String, UploadError> {
         .and_then(|status| status.trim().parse::<u16>().ok())
         .ok_or_else(|| UploadError::Unreachable("ElevenLabs sent no status".into()))?;
     match status {
-        200..=299 => parse_transcript(body),
+        200..=299 => Ok(body),
         401 => Err(UploadError::Rejected(
             "ElevenLabs didn't accept the API key".into(),
         )),
@@ -454,6 +530,42 @@ fn parse_transcript(body: &[u8]) -> std::result::Result<String, UploadError> {
         .map_err(|_| UploadError::Unreachable("ElevenLabs sent an unexpected answer".into()))
 }
 
+/// Word timings into stretches of one speaker, ignoring spacing and events.
+fn parse_spans(body: &[u8]) -> std::result::Result<Vec<SpeakerSpan>, UploadError> {
+    #[derive(serde::Deserialize)]
+    struct Word {
+        #[serde(rename = "type")]
+        kind: String,
+        start: Option<f64>,
+        end: Option<f64>,
+        speaker_id: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Response {
+        words: Vec<Word>,
+    }
+    let response: Response = serde_json::from_slice(body)
+        .map_err(|_| UploadError::Unreachable("ElevenLabs sent an unexpected answer".into()))?;
+    let mut spans: Vec<SpeakerSpan> = Vec::new();
+    for word in response.words {
+        let (true, Some(start), Some(end), Some(speaker)) =
+            (word.kind == "word", word.start, word.end, word.speaker_id)
+        else {
+            continue;
+        };
+        let (start_ms, end_ms) = ((start * 1000.0) as u64, (end * 1000.0) as u64);
+        match spans.last_mut() {
+            Some(last) if last.speaker == speaker => last.end_ms = last.end_ms.max(end_ms),
+            _ => spans.push(SpeakerSpan {
+                speaker,
+                start_ms,
+                end_ms,
+            }),
+        }
+    }
+    Ok(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,7 +581,21 @@ mod tests {
             model_id: "scribe_v2",
             language,
             timeout_seconds,
+            file: None,
+            diarize: false,
         }
+    }
+
+    fn parse_response(output: &[u8]) -> std::result::Result<String, UploadError> {
+        response_body(output).and_then(parse_transcript)
+    }
+
+    fn post_text(
+        request: &Request<'_>,
+        audio: Vec<u8>,
+        stop: impl Fn() -> bool,
+    ) -> std::result::Result<String, UploadError> {
+        post(request, FAKE_KEY, audio, stop).and_then(|body| parse_transcript(&body))
     }
 
     /// What the loopback server read.
@@ -686,7 +812,7 @@ mod tests {
         let (url, received) = server(200, r#"{"text":"hello there","words":[]}"#.into());
         let samples = vec![0.25_f32; 100_000];
         let audio = encode_wav(&samples).unwrap();
-        let text = post(&request(&url, "de", 10), FAKE_KEY, audio.clone(), never).unwrap();
+        let text = post_text(&request(&url, "de", 10), audio.clone(), never).unwrap();
         assert_eq!(text, "hello there");
         let received = received.recv().unwrap();
         assert!(received.head.contains(&format!("xi-api-key: {FAKE_KEY}")));
@@ -712,10 +838,76 @@ mod tests {
     }
 
     #[test]
+    fn a_diarization_uploads_the_file_and_never_stdin() {
+        let directory = tempfile_dir("diarize upload");
+        let track = directory.join("system.speakers.wav");
+        fs::write(&track, b"RIFF-track-bytes").unwrap();
+        let answer = serde_json::json!({ "words": [
+            {"type": "word", "text": "Hi", "start": 0.0, "end": 0.5, "speaker_id": "speaker_0"},
+            {"type": "spacing", "text": " ", "start": 0.5, "end": 0.6, "speaker_id": "speaker_0"},
+            {"type": "word", "text": "there", "start": 0.6, "end": 1.0, "speaker_id": "speaker_0"},
+            {"type": "word", "text": "Hello", "start": 2.0, "end": 2.5, "speaker_id": "speaker_1"},
+            {"type": "audio_event", "text": "(cough)", "start": 3.0, "end": 3.1, "speaker_id": "speaker_2"},
+        ]});
+        let (url, received) = server(200, answer.to_string());
+        let mut upload = request(&url, "auto", 10);
+        upload.file = Some(&track);
+        upload.diarize = true;
+        let body = post(&upload, FAKE_KEY, Vec::new(), never).unwrap();
+        let spans = parse_spans(&body).unwrap();
+        assert_eq!(
+            spans,
+            [
+                SpeakerSpan {
+                    speaker: "speaker_0".into(),
+                    start_ms: 0,
+                    end_ms: 1_000
+                },
+                SpeakerSpan {
+                    speaker: "speaker_1".into(),
+                    start_ms: 2_000,
+                    end_ms: 2_500
+                },
+            ]
+        );
+        let received = received.recv().unwrap();
+        let sent = String::from_utf8_lossy(&received.body);
+        for field in [
+            "name=\"diarize\"",
+            "word",
+            "RIFF-track-bytes",
+            "filename=\"audio.wav\"",
+        ] {
+            assert!(sent.contains(field), "{field}");
+        }
+        assert!(!sent.contains("language_code"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_form_path_cant_add_options() {
+        let path = Path::new("/tmp/a;type=text/plain\\\"b.wav");
+        let mut upload = request("https://example.test/", "en", 30);
+        upload.file = Some(path);
+        let arguments = curl_arguments(&upload);
+        assert!(
+            arguments.contains(
+                &"file=@\"/tmp/a;type=text/plain\\\\\\\"b.wav\";filename=audio.wav;type=audio/wav"
+                    .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn a_meeting_has_about_its_own_length_to_upload() {
+        assert_eq!(diarize_timeout_seconds(16_000 * 3_600), 3_720);
+    }
+
+    #[test]
     fn a_response_larger_than_a_pipe_buffer_still_arrives() {
         let text = "word ".repeat(100_000);
         let (url, _received) = server(200, serde_json::json!({ "text": text }).to_string());
-        let answer = post(&request(&url, "en", 10), FAKE_KEY, vec![0; 16], never).unwrap();
+        let answer = post_text(&request(&url, "en", 10), vec![0; 16], never).unwrap();
         assert_eq!(answer, text.trim());
     }
 
@@ -723,12 +915,12 @@ mod tests {
     fn server_errors_are_unreachable_and_a_bad_key_is_rejected() {
         let (url, _received) = server(500, "{}".into());
         assert!(matches!(
-            post(&request(&url, "en", 10), FAKE_KEY, vec![0; 16], never),
+            post_text(&request(&url, "en", 10), vec![0; 16], never),
             Err(UploadError::Unreachable(_))
         ));
         let (url, _received) = server(401, "{}".into());
         assert!(matches!(
-            post(&request(&url, "en", 10), FAKE_KEY, vec![0; 16], never),
+            post_text(&request(&url, "en", 10), vec![0; 16], never),
             Err(UploadError::Rejected(_))
         ));
     }
@@ -738,7 +930,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
         drop(listener);
-        let error = post(&request(&url, "en", 10), FAKE_KEY, vec![0; 16], never).unwrap_err();
+        let error = post_text(&request(&url, "en", 10), vec![0; 16], never).unwrap_err();
         assert!(matches!(error, UploadError::Unreachable(_)), "{error:?}");
         assert!(!error.to_string().contains(FAKE_KEY));
     }
@@ -748,7 +940,7 @@ mod tests {
         let (url, _handle) = hanging_server();
         let mut refused = request(&url, "en", 10);
         refused.protocols = "=https";
-        let error = post(&refused, FAKE_KEY, vec![0; 16], never).unwrap_err();
+        let error = post_text(&refused, vec![0; 16], never).unwrap_err();
         assert!(matches!(error, UploadError::Unreachable(_)), "{error:?}");
     }
 
@@ -756,7 +948,7 @@ mod tests {
     fn a_hung_server_ends_at_the_timeout() {
         let (url, _handle) = hanging_server();
         let started = Instant::now();
-        let error = post(&request(&url, "en", 1), FAKE_KEY, vec![0; 16], never).unwrap_err();
+        let error = post_text(&request(&url, "en", 1), vec![0; 16], never).unwrap_err();
         assert!(matches!(error, UploadError::Unreachable(_)), "{error:?}");
         assert!(started.elapsed() < Duration::from_secs(5));
     }
@@ -774,7 +966,7 @@ mod tests {
         });
         armed.send(()).unwrap();
         let started = Instant::now();
-        let error = post(&request(&url, "en", 60), FAKE_KEY, vec![0; 16], || {
+        let error = post_text(&request(&url, "en", 60), vec![0; 16], || {
             cancelled.load(Ordering::Acquire)
         })
         .unwrap_err();

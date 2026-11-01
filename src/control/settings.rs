@@ -343,6 +343,11 @@ const KEYS: &[Key] = &[
         "Labs: a dictation ElevenLabs can't be reached for runs on the last local model (macOS)",
     ),
     key(
+        "labs.meeting_speakers",
+        Kind::Bool,
+        "Labs: tell the other participants apart after a meeting, which sends their audio to ElevenLabs (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
@@ -538,6 +543,7 @@ const NEEDS: &[(&str, &str)] = &[
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
     ("labs.subtitle_export", "meetings"),
+    ("labs.meeting_speakers", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("show_dock_icon", "dock_icon"),
     ("keyboard_model_switching.", "keyboard_model_switching"),

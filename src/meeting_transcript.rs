@@ -254,6 +254,7 @@ impl TrackTranscript {
                     let start = (segment.start_ms.max(0) as u64).min(duration_ms);
                     let end = (segment.end_ms.max(0) as u64).min(duration_ms);
                     (!text.is_empty() && end > start).then(|| TranscriptEntry {
+                        speaker: None,
                         source: self.source,
                         start_ms: chunk_ms + start,
                         end_ms: chunk_ms + end,
@@ -265,6 +266,7 @@ impl TrackTranscript {
             let text = transcript.text.trim();
             (!text.is_empty())
                 .then(|| TranscriptEntry {
+                    speaker: None,
                     source: self.source,
                     start_ms: chunk_ms,
                     end_ms: chunk_ms + duration_ms,
@@ -381,6 +383,7 @@ impl TrackTranscript {
         for group in groups.into_iter().take(published) {
             let group = words.drain(..group.len()).collect::<Vec<_>>();
             self.entries.push(TranscriptEntry {
+                speaker: None,
                 source: self.source,
                 start_ms: group[0].start_ms as u64,
                 end_ms: group
@@ -2133,7 +2136,7 @@ pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptE
     for turn in turns {
         markdown.push_str(&format!(
             "**{}** · {}\n{}\n\n",
-            turn.source.label(),
+            turn.label(),
             format_duration(turn.start_ms),
             turn.text.trim()
         ));
@@ -2303,6 +2306,7 @@ mod tests {
 
     fn entry(source: MeetingSource, start_ms: u64, end_ms: u64, text: &str) -> TranscriptEntry {
         TranscriptEntry {
+            speaker: None,
             source,
             start_ms,
             end_ms,

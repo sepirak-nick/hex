@@ -604,7 +604,7 @@ fn render_subtitles<'a>(
         number += 1;
         let start = entry.start_ms;
         let end = entry.end_ms.max(start);
-        let speaker = entry.source.label();
+        let speaker = entry.label();
         match format {
             SubtitleFormat::Srt => {
                 out.push_str(&format!(
