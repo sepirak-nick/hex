@@ -41,6 +41,10 @@ const AGENTATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// A click just before the audio starts still belongs to this recording.
 const CLICK_LEAD_MS: u64 = 1_000;
 const NO_WORDS: &str = "(Pointed at this without saying anything.)";
+const RECORDING_INTRO: &str = "Everything said in this recording. hexClick is this note's click. Each \
+note's words were matched to its click by timing, so a remark may be divided between notes or \
+sit on the wrong one; go by this when they disagree:";
+const MAX_RECORDING_CHARS: usize = 8_000;
 /// A silence this long ends a sentence Scribe didn't punctuate.
 const SENTENCE_PAUSE_MS: u64 = 1_500;
 /// A silence this long divides a sentence with several clicks in it.
@@ -524,8 +528,37 @@ pub(crate) fn deliver(
     };
     let words = crate::elevenlabs::transcribe_words(samples, language, cancelled)?;
     let notes = split_words(&words, clicks, start_ms);
-    post_notes(agentation, clicks, &notes)?;
+    let recording = full_recording(&words, clicks, start_ms);
+    post_notes(agentation, clicks, &notes, recording.as_deref())?;
     Ok(format!("Sent {} notes to Agentation", notes.len()))
+}
+
+/// Everything said, with `[click N]` where each click fell, for an agent to mend a
+/// remark that timing divided wrongly. Only worth sending with several clicks.
+/// A long recording keeps its start, since every note carries a copy.
+fn full_recording(words: &[TimedWord], clicks: &[Click], start_ms: u64) -> Option<String> {
+    if clicks.len() < 2 {
+        return None;
+    }
+    let mut text = String::from(RECORDING_INTRO);
+    let mut next = 0;
+    for word in words {
+        while next < clicks.len() && clicks[next].timestamp <= start_ms + word.start_ms {
+            next += 1;
+            text.push_str(&format!(" [click {next}]"));
+        }
+        text.push(' ');
+        text.push_str(&word.text);
+    }
+    while next < clicks.len() {
+        next += 1;
+        text.push_str(&format!(" [click {next}]"));
+    }
+    if text.chars().count() > MAX_RECORDING_CHARS {
+        text = text.chars().take(MAX_RECORDING_CHARS).collect();
+        text.push('…');
+    }
+    Some(text)
 }
 
 /// The first address answering as Agentation does, so notes never go to
@@ -537,9 +570,14 @@ fn find_agentation<'a>(addresses: &[&'a str]) -> Option<&'a str> {
     })
 }
 
-fn post_notes(agentation: &str, clicks: &[Click], notes: &[String]) -> Result<()> {
+fn post_notes(
+    agentation: &str,
+    clicks: &[Click],
+    notes: &[String],
+    recording: Option<&str>,
+) -> Result<()> {
     let mut sessions: Vec<(String, String)> = Vec::new();
-    for (click, comment) in clicks.iter().zip(notes) {
+    for (index, (click, comment)) in clicks.iter().zip(notes).enumerate() {
         let session = match sessions.iter().find(|(url, _)| *url == click.url) {
             Some((_, session)) => session.clone(),
             None => {
@@ -551,6 +589,14 @@ fn post_notes(agentation: &str, clicks: &[Click], notes: &[String]) -> Result<()
         let mut note = serde_json::to_value(click)?;
         note["comment"] = json!(comment);
         note["kind"] = json!("feedback");
+        // `attributes` is the one open field Agentation's MCP tools pass on, and it
+        // keeps the toolbar's note to the words themselves.
+        if let Some(recording) = recording {
+            note["attributes"] = json!({
+                "hexClick": (index + 1).to_string(),
+                "hexFullRecording": recording,
+            });
+        }
         request_at(
             agentation,
             "POST",
@@ -720,7 +766,7 @@ mod tests {
         ));
         words.extend(spoken(7_500, "Let's change this button the same way."));
         words.extend(spoken(
-            10_200,
+            12_300,
             "Let's team-- change team to organization and change this price to five hundred dollars",
         ));
         let clicks = [
@@ -789,11 +835,11 @@ mod tests {
 
     #[test]
     fn clicks_inside_one_unbroken_clause_divide_it_by_word() {
-        let words = spoken(0, "this button and this heading");
-        let clicks = [click(150, ".button"), click(1_350, ".heading")];
+        let words = spoken(0, "this button this heading");
+        let clicks = [click(150, ".button"), click(1_000, ".heading")];
         assert_eq!(
             split_words(&words, &clicks, 0),
-            ["this button and", "this heading"]
+            ["this button", "this heading"]
         );
     }
 
@@ -958,6 +1004,71 @@ mod tests {
         assert_eq!(note["boundingBox"]["width"], 3.0);
     }
 
+    #[test]
+    fn the_full_recording_marks_where_each_click_fell() {
+        let words = [
+            word("change", 0, 100),
+            word("this", 200, 300),
+            word("price", 400, 500),
+            word("nicely", 600, 700),
+        ];
+        let clicks = [click(150, ".a"), click(400, ".b"), click(5_000, ".late")];
+        let text = full_recording(&words, &clicks, 0).unwrap();
+        assert!(text.starts_with(RECORDING_INTRO));
+        assert!(
+            text.ends_with("change [click 1] this [click 2] price nicely [click 3]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_full_recording_is_on_the_clip_timeline_and_held_to_a_size() {
+        let clicks = [click(10_100, ".a"), click(10_300, ".b")];
+        let text = full_recording(
+            &[word("one", 0, 50), word("two", 200, 250)],
+            &clicks,
+            10_000,
+        )
+        .unwrap();
+        assert!(text.ends_with("one [click 1] two [click 2]"), "{text}");
+        let many: Vec<_> = (0..5_000).map(|at| word("word", at, at + 1)).collect();
+        let long = full_recording(&many, &[click(0, ".a"), click(1, ".b")], 0).unwrap();
+        assert_eq!(long.chars().count(), MAX_RECORDING_CHARS + 1);
+        assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn one_click_needs_no_full_recording() {
+        assert_eq!(
+            full_recording(&[word("hi", 0, 1)], &[click(0, ".a")], 0),
+            None
+        );
+    }
+
+    #[test]
+    fn notes_carry_the_full_recording_and_their_click_number() {
+        let (address, received) = fake_server(&[
+            ("POST /sessions", 201, r#"{"id":"s-1"}"#),
+            ("POST /sessions/s-1/annotations", 201, "{}"),
+        ]);
+        let clicks = [click(1, ".a"), click(2, ".b")];
+        post_notes(
+            &address,
+            &clicks,
+            &["first".to_owned(), "second".to_owned()],
+            Some("all of it"),
+        )
+        .unwrap();
+        let sent: Vec<String> = received.try_iter().collect();
+        assert!(sent[1].contains(r#""hexClick":"1""#), "{sent:?}");
+        assert!(sent[2].contains(r#""hexClick":"2""#), "{sent:?}");
+        assert!(
+            sent[2].contains(r#""hexFullRecording":"all of it""#),
+            "{sent:?}"
+        );
+        assert!(sent[2].contains(r#""comment":"second""#), "{sent:?}");
+    }
+
     /// A fake server that answers each request by path, and records them.
     fn fake_server(
         routes: &'static [(&'static str, u16, &'static str)],
@@ -1031,6 +1142,7 @@ mod tests {
             &address,
             &clicks,
             &["first".to_owned(), "second".to_owned()],
+            None,
         )
         .unwrap();
         let sent: Vec<String> = received.try_iter().collect();
@@ -1054,12 +1166,12 @@ mod tests {
             session_id: Some("gone".into()),
             ..click(1, ".a")
         };
-        post_notes(&address, &[stale], &["words".to_owned()]).unwrap();
+        post_notes(&address, &[stale], &["words".to_owned()], None).unwrap();
         let strange = Click {
             session_id: Some("../../evil".into()),
             ..click(1, ".a")
         };
-        post_notes(&address, &[strange], &["words".to_owned()]).unwrap();
+        post_notes(&address, &[strange], &["words".to_owned()], None).unwrap();
         let sent: Vec<String> = received.try_iter().collect();
         assert!(sent.iter().all(|line| !line.contains("evil")), "{sent:?}");
         assert!(
@@ -1067,7 +1179,7 @@ mod tests {
                 .any(|line| line.starts_with("POST /sessions/new-1/annotations"))
         );
         let (refusing, _) = fake_server(&[("POST /sessions", 500, "{}")]);
-        assert!(post_notes(&refusing, &[click(1, ".a")], &["words".to_owned()]).is_err());
+        assert!(post_notes(&refusing, &[click(1, ".a")], &["words".to_owned()], None).is_err());
     }
 
     /// The whole path against real parts: a real browser clicks the demo page

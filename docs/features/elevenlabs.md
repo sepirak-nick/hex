@@ -90,6 +90,7 @@ Labs > Talk and click (off)                // labs.talk_and_click; hex labs on t
     │   ├── Each sentence -> the click made while saying it, else the nearest; a click with no words says so
     │   │   └── Several clicks in one sentence -> divided at its commas, pauses, and "and", "but", or "then", then by word
     │   └── One note per click -> Agentation's server on 4747, in the toolbar's session when the page has one
+    │       └── With several clicks, each note's attributes carry hexClick and hexFullRecording: everything said, with [click N] markers, up to 8,000 characters
     └── Escape -> nothing is sent; its clicks are dropped by the next dictation
 ```
 
