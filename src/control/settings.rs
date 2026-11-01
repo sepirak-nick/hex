@@ -353,6 +353,11 @@ const KEYS: &[Key] = &[
         "Labs: ask OpenCode to name labeled speakers from the calendar and the conversation (macOS)",
     ),
     key(
+        "labs.talk_and_click",
+        Kind::Bool,
+        "Labs: talk and click things on a development page; each click becomes an Agentation note, and that audio goes to ElevenLabs (macOS)",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

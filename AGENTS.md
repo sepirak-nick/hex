@@ -140,7 +140,8 @@ substitute for source inspection or a second roadmap.
   deadlines, and quitting kill. Only `WarmTranscriber::transcribe_dictation`
   calls it, falling back to the last local model when ElevenLabs is unreachable;
   everything else uses `app_settings::local_transcription_selection`. `diarize`
-  serves Labs › Meeting speaker labels from a temporary file. See
+  serves Labs › Meeting speaker labels from a temporary file, and
+  `transcribe_words` serves Labs › Talk and click. See
   [`docs/features/elevenlabs.md`](docs/features/elevenlabs.md).
 - `transcription_engine`: the thread that owns the loaded model on every OS and
   runs every inference in order: live streams fed during capture, their finish,
@@ -773,10 +774,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Printed and Paste Last skips it.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
-- Only two things may upload to ElevenLabs. Press-to-paste dictation, with Labs ›
-  ElevenLabs transcription on and its model selected. And a finished meeting's
-  system track, never its microphone track, once, with Labs › Meeting speaker
-  labels on, to label the local transcript (`meeting_speakers`). Meeting
+- Only three things may upload to ElevenLabs. Press-to-paste dictation, with Labs ›
+  ElevenLabs transcription on and its model selected. A finished meeting's system
+  track, never its microphone track, once, with Labs › Meeting speaker labels on,
+  to label the local transcript (`meeting_speakers`). And a dictation that collected
+  clicks from a page with Labs › Talk and click on (`talk_and_click`). Meeting
   transcription, Annotate, `/dictations`, and the rest of the local API stay
   local whatever is selected; `Transcriber::transcribe` and `transcribe_segments`
   refuse a cloud model.

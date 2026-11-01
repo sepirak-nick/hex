@@ -876,6 +876,7 @@ pub fn listen(
             input.request_selection(next_microphone_revision, microphone.as_deref());
             microphone_revision = next_microphone_revision;
         }
+        crate::talk_and_click::sync(crate::labs::talk_and_click());
         let (next_revision, selection) = crate::app_settings::transcription_selection();
         if next_revision != transcription_revision && dictation_worker.reload(selection).is_ok() {
             transcription_revision = next_revision;
@@ -1932,9 +1933,10 @@ fn handle_dictation_event(
                 TranscriptionTarget::Paste | TranscriptionTarget::RawPaste => {
                     DictationPhase::Pasted
                 }
-                TranscriptionTarget::Print | TranscriptionTarget::RawPrint => {
-                    DictationPhase::Printed
-                }
+                // Nothing was pasted: the notes went to Agentation.
+                TranscriptionTarget::Print
+                | TranscriptionTarget::RawPrint
+                | TranscriptionTarget::TalkAndClick => DictationPhase::Printed,
                 TranscriptionTarget::Service => return Ok(()),
             };
             feedback::play(Tone::DictationDone);

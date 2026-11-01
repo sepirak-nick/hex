@@ -75,6 +75,33 @@ guesses. Without a connected calendar it only has what people say in the call.
 Check: `meeting_speakers.rs`; `live_opencode_names_speakers_and_leaves_the_unsure_one`
 uses `HEX_LIVE_OPENCODE_MODEL`.
 
+## Talk and click
+
+```ts
+Labs > Talk and click (off)                // labs.talk_and_click; hex labs on talk-and-click; talk_and_click.rs
+├── Off -> the port is closed; pages with the script do nothing
+└── On -> Hex listens on 127.0.0.1:47489 for pages with <script src="http://127.0.0.1:47489/client.js">
+    ├── A dictation records, from its press until its clip is submitted
+    │   └── The page highlights what's under the pointer; a click marks it instead of pressing it. Agentation's toolbar still clicks normally
+    ├── It finishes with no clicks -> an ordinary dictation, on the selected model, pasted
+    ├── It finishes with clicks -> nothing is pasted or kept in History
+    │   ├── Agentation's server isn't running -> fails before any upload, naming the command to start it; the words are lost
+    │   ├── Audio -> ElevenLabs with word timing, whichever model is selected, and with no local fallback
+    │   ├── Each word -> the click nearest its middle; a click with no words says so
+    │   └── One note per click -> Agentation's server on 4747, in the toolbar's session when the page has one
+    └── Escape -> nothing is sent; its clicks are dropped by the next dictation
+```
+
+The page's clicks are refused unless a dictation records, and the listener refuses
+other `Host` headers and any `Origin` but `localhost`, `127.0.0.1`, `[::1]`,
+`*.localhost`, `*.local`, and `*.test`. Notes carry what the page sends, and an agent
+reads them, so only add the script to pages you trust. Selectors and React component
+names are this script's own, simpler than Agentation's; source files aren't captured.
+Word splitting is by time alone, so a sentence spanning two clicks can split awkwardly.
+
+Check: `talk_and_click.rs`; `live_a_real_page_click_becomes_an_agentation_note` drives
+`prototypes/talk-and-click-demo` with a browser and `HEX_LIVE_WAV`.
+
 ## The key
 
 `ELEVENLABS_API_KEY` wins, then the owner-only `<support>/elevenlabs-api-key`

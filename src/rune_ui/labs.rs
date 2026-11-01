@@ -232,6 +232,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 "Meeting speaker names",
                 "Asks OpenCode to name labeled speakers from the calendar and the conversation. Names can be wrong",
             ));
+            rows.push(row(
+                Feature::TalkAndClick,
+                &WAVE,
+                "Talk and click",
+                "While dictating, click things on a development page: each click becomes an Agentation note. Sends that audio to ElevenLabs",
+            ));
         }
     }
     rows.push(row(
@@ -301,6 +307,7 @@ fn row_key(feature: Feature) -> &'static str {
         Feature::ElevenLabs => "lab-elevenlabs",
         Feature::MeetingSpeakers => "lab-meeting-speakers",
         Feature::MeetingSpeakerNames => "lab-meeting-speaker-names",
+        Feature::TalkAndClick => "lab-talk-and-click",
     }
 }
 

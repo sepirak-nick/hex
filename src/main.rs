@@ -165,6 +165,8 @@ mod spring;
 mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod talk_and_click;
 mod text_replacements;
 mod transcript;
 mod transcript_cli;

@@ -49,10 +49,11 @@ pub enum Feature {
     ElevenLabs,
     MeetingSpeakers,
     MeetingSpeakerNames,
+    TalkAndClick,
 }
 
 impl Feature {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -75,6 +76,7 @@ impl Feature {
         Self::ElevenLabs,
         Self::MeetingSpeakers,
         Self::MeetingSpeakerNames,
+        Self::TalkAndClick,
     ];
 
     /// The features this OS has.
@@ -96,7 +98,8 @@ impl Feature {
             | Self::SecondDictationShortcut
             | Self::ElevenLabs
             | Self::MeetingSpeakers
-            | Self::MeetingSpeakerNames => cfg!(target_os = "macos"),
+            | Self::MeetingSpeakerNames
+            | Self::TalkAndClick => cfg!(target_os = "macos"),
             Self::KeyboardModelSwitching => crate::keyboard_input_sources::available(),
             Self::Playground
             | Self::LiveText
@@ -133,6 +136,7 @@ impl Feature {
             Self::ElevenLabs => "elevenlabs",
             Self::MeetingSpeakers => "meeting-speakers",
             Self::MeetingSpeakerNames => "meeting-speaker-names",
+            Self::TalkAndClick => "talk-and-click",
         }
     }
 
@@ -161,6 +165,7 @@ impl Feature {
             Self::ElevenLabs => "labs.elevenlabs",
             Self::MeetingSpeakers => "labs.meeting_speakers",
             Self::MeetingSpeakerNames => "labs.meeting_speaker_names",
+            Self::TalkAndClick => "labs.talk_and_click",
         }
     }
 
@@ -216,6 +221,9 @@ impl Feature {
             Self::MeetingSpeakerNames => {
                 "Ask OpenCode to name labeled speakers from the calendar and the conversation; names can be wrong"
             }
+            Self::TalkAndClick => {
+                "Talk and click things on a development page; each click becomes an Agentation note. Sends that audio to ElevenLabs"
+            }
         }
     }
 
@@ -248,6 +256,7 @@ impl Feature {
             Self::ElevenLabs => settings.labs.elevenlabs,
             Self::MeetingSpeakers => settings.labs.meeting_speakers,
             Self::MeetingSpeakerNames => settings.labs.meeting_speaker_names,
+            Self::TalkAndClick => settings.labs.talk_and_click,
         }
     }
 
@@ -278,6 +287,7 @@ impl Feature {
             }
             Self::MeetingSpeakers => settings.labs.meeting_speakers = on,
             Self::MeetingSpeakerNames => settings.labs.meeting_speaker_names = on,
+            Self::TalkAndClick => settings.labs.talk_and_click = on,
         }
     }
 }
@@ -299,8 +309,9 @@ const ELEVENLABS: u32 = 1 << 12;
 const ELEVENLABS_FALLBACK: u32 = 1 << 13;
 const MEETING_SPEAKERS: u32 = 1 << 14;
 const MEETING_SPEAKER_NAMES: u32 = 1 << 15;
+const TALK_AND_CLICK: u32 = 1 << 16;
 /// Unload-idle minutes sit above the switches.
-const MINUTES_SHIFT: u32 = 16;
+const MINUTES_SHIFT: u32 = 17;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -414,6 +425,13 @@ pub fn meeting_speaker_names() -> bool {
     on(MEETING_SPEAKER_NAMES)
 }
 
+/// Clicks on a development page during a dictation become Agentation notes
+/// (macOS; read in the listener's loop and as each dictation is submitted).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn talk_and_click() -> bool {
+    on(TALK_AND_CLICK)
+}
+
 #[cfg(test)]
 thread_local! {
     static ELEVENLABS_FOR_TEST: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
@@ -464,6 +482,7 @@ fn encode(settings: &LabsSettings) -> u32 {
         (settings.elevenlabs_fallback, ELEVENLABS_FALLBACK),
         (settings.meeting_speakers, MEETING_SPEAKERS),
         (settings.meeting_speaker_names, MEETING_SPEAKER_NAMES),
+        (settings.talk_and_click, TALK_AND_CLICK),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -670,6 +689,10 @@ mod tests {
         assert_eq!(state & MEETING_SPEAKER_NAMES, 0);
         labs.meeting_speaker_names = true;
         assert_ne!(encode(&labs) & MEETING_SPEAKER_NAMES, 0);
+        assert_eq!(encode(&labs) >> MINUTES_SHIFT, 24 * 60);
+        assert_eq!(encode(&labs) & TALK_AND_CLICK, 0);
+        labs.talk_and_click = true;
+        assert_ne!(encode(&labs) & TALK_AND_CLICK, 0);
         assert_eq!(encode(&labs) >> MINUTES_SHIFT, 24 * 60);
     }
 

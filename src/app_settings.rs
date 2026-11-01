@@ -1377,6 +1377,9 @@ pub struct LabsSettings {
     /// OpenCode names labeled speakers from the calendar and conversation
     /// (macOS). Needs `meeting_speakers` and Summarize with OpenCode.
     pub meeting_speaker_names: bool,
+    /// Clicks on a development page during a dictation become Agentation notes
+    /// (macOS). Sends that dictation's audio to ElevenLabs.
+    pub talk_and_click: bool,
 }
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
@@ -1403,6 +1406,7 @@ impl Default for LabsSettings {
             elevenlabs_fallback: true,
             meeting_speakers: false,
             meeting_speaker_names: false,
+            talk_and_click: false,
         }
     }
 }

@@ -95,6 +95,9 @@ pub enum TranscriptionTarget {
     Print,
     /// A printing stop of a raw dictation: the transcript as heard.
     RawPrint,
+    /// A dictation that collected clicks (Labs › Talk and click): its notes went
+    /// to Agentation, so nothing is pasted or kept in History.
+    TalkAndClick,
 }
 
 struct InferenceJob {
@@ -423,7 +426,24 @@ impl DictationWorker {
         };
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
-        let stream = clip.take_stream();
+        // The clip was just cut, so it began its own length ago. Close enough for
+        // clicks, which the page stamps on this Mac's clock.
+        let clip_start_ms = crate::events::now_ms().saturating_sub(audio_ms);
+        let clicks = if crate::labs::talk_and_click()
+            && matches!(
+                target,
+                TranscriptionTarget::Paste | TranscriptionTarget::RawPaste
+            ) {
+            crate::talk_and_click::take_clicks(clip_start_ms)
+        } else {
+            Vec::new()
+        };
+        let target = if clicks.is_empty() {
+            target
+        } else {
+            TranscriptionTarget::TalkAndClick
+        };
+        let stream = clip.take_stream().filter(|_| clicks.is_empty());
         let _capture = clip.take_capture_marker();
         let samples = clip.into_transcription_samples();
         crate::dictation_diagnostics::persist(&samples);
@@ -435,6 +455,16 @@ impl DictationWorker {
                     return Err("dictation was cancelled".to_string());
                 }
                 let _busy = DictationInference::begin();
+                if !clicks.is_empty() {
+                    return crate::talk_and_click::deliver(
+                        &clicks,
+                        &samples,
+                        clip_start_ms,
+                        &selection.language,
+                        &control.cancelled,
+                    )
+                    .map_err(|error| error.to_string());
+                }
                 model
                     .transcribe_dictation(&selection, samples, &control.cancelled)
                     .map_err(|error| error.to_string())
@@ -813,7 +843,10 @@ fn run_inference_worker(
                 "transcribed dictation"
             );
             let text = transcribed.text;
-            let corrected = if matches!(job.target, TranscriptionTarget::Service) {
+            let corrected = if matches!(
+                job.target,
+                TranscriptionTarget::Service | TranscriptionTarget::TalkAndClick
+            ) {
                 text.clone()
             } else {
                 text.trim().to_string()
@@ -1029,7 +1062,8 @@ fn finish_output(
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
-                        | TranscriptionTarget::RawPrint => commit()
+                        | TranscriptionTarget::RawPrint
+                        | TranscriptionTarget::TalkAndClick => commit()
                             .then_some(())
                             .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
@@ -1108,7 +1142,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         TranscriptionTarget::Paste => HistoryKind::Dictation,
         TranscriptionTarget::RawPaste => HistoryKind::Raw,
         TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
-        TranscriptionTarget::Service => return,
+        TranscriptionTarget::Service | TranscriptionTarget::TalkAndClick => return,
     };
     let draft = HistoryDraft {
         kind,

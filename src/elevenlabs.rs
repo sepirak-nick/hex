@@ -136,6 +136,7 @@ impl ElevenLabs {
             timeout_seconds: timeout_seconds(samples.len()),
             file: None,
             diarize: false,
+            words: false,
         };
         let stop = || {
             cancelled.load(Ordering::Acquire)
@@ -151,6 +152,46 @@ impl ElevenLabs {
         );
         result
     }
+}
+
+/// One transcribed word, in ms from the clip's start.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimedWord {
+    pub text: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+/// Uploads a dictation for its words and when each was said, which Labs › Talk
+/// and click uses to match words to clicks.
+pub fn transcribe_words(
+    samples: &[f32],
+    language: &str,
+    cancelled: &AtomicBool,
+) -> std::result::Result<Vec<TimedWord>, UploadError> {
+    let key = read_key()
+        .map_err(|error| UploadError::Rejected(error.to_string()))?
+        .ok_or_else(|| {
+            UploadError::Rejected("Add an ElevenLabs API key to use talk and click".into())
+        })?;
+    let audio = encode_wav(samples)
+        .map_err(|error| UploadError::Rejected(format!("could not encode audio: {error}")))?;
+    let request = Request {
+        url: ENDPOINT,
+        protocols: "=https",
+        model_id: "scribe_v2",
+        language,
+        timeout_seconds: timeout_seconds(samples.len()),
+        file: None,
+        diarize: false,
+        words: true,
+    };
+    let stop = || {
+        cancelled.load(Ordering::Acquire)
+            || crate::gguf_session::job_cancel().is_some_and(|cancel| cancel.is_cancelled())
+            || crate::process_exit::quitting()
+    };
+    post(&request, &key, audio, stop).and_then(|body| parse_words(&body))
 }
 
 /// Who spoke one stretch of a track, in ms from its start.
@@ -182,6 +223,7 @@ pub fn diarize(
         timeout_seconds: diarize_timeout_seconds(samples),
         file: Some(track),
         diarize: true,
+        words: true,
     };
     let result = post(&request, &key, Vec::new(), stop).and_then(|body| parse_spans(&body));
     tracing::info!(
@@ -335,8 +377,10 @@ struct Request<'a> {
     timeout_seconds: u64,
     /// Upload this file instead of stdin.
     file: Option<&'a Path>,
-    /// Ask who speaks each word, which needs word timestamps.
+    /// Ask who speaks each word.
     diarize: bool,
+    /// Ask when each word was said.
+    words: bool,
 }
 
 /// Everything curl is told on its command line, which any process on this Mac
@@ -366,7 +410,7 @@ fn curl_arguments(request: &Request<'_>) -> Vec<String> {
         "--form-string",
         "tag_audio_events=false",
         "--form-string",
-        if request.diarize {
+        if request.words {
             "timestamps_granularity=word"
         } else {
             "timestamps_granularity=none"
@@ -530,6 +574,36 @@ fn parse_transcript(body: &[u8]) -> std::result::Result<String, UploadError> {
         .map_err(|_| UploadError::Unreachable("ElevenLabs sent an unexpected answer".into()))
 }
 
+/// Spoken words with their times, ignoring spacing and events.
+fn parse_words(body: &[u8]) -> std::result::Result<Vec<TimedWord>, UploadError> {
+    #[derive(serde::Deserialize)]
+    struct Word {
+        #[serde(rename = "type")]
+        kind: String,
+        text: String,
+        start: Option<f64>,
+        end: Option<f64>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Response {
+        words: Vec<Word>,
+    }
+    let response: Response = serde_json::from_slice(body)
+        .map_err(|_| UploadError::Unreachable("ElevenLabs sent an unexpected answer".into()))?;
+    Ok(response
+        .words
+        .into_iter()
+        .filter(|word| word.kind == "word")
+        .filter_map(|word| {
+            Some(TimedWord {
+                text: word.text,
+                start_ms: (word.start? * 1000.0) as u64,
+                end_ms: (word.end? * 1000.0) as u64,
+            })
+        })
+        .collect())
+}
+
 /// Word timings into stretches of one speaker, ignoring spacing and events.
 fn parse_spans(body: &[u8]) -> std::result::Result<Vec<SpeakerSpan>, UploadError> {
     #[derive(serde::Deserialize)]
@@ -583,6 +657,7 @@ mod tests {
             timeout_seconds,
             file: None,
             diarize: false,
+            words: false,
         }
     }
 
@@ -853,6 +928,7 @@ mod tests {
         let mut upload = request(&url, "auto", 10);
         upload.file = Some(&track);
         upload.diarize = true;
+        upload.words = true;
         let body = post(&upload, FAKE_KEY, Vec::new(), never).unwrap();
         let spans = parse_spans(&body).unwrap();
         assert_eq!(
@@ -882,6 +958,52 @@ mod tests {
         }
         assert!(!sent.contains("language_code"));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn word_timings_keep_words_and_skip_spacing_and_events() {
+        let body = serde_json::json!({ "words": [
+            {"type": "word", "text": "Hello,", "start": 0.25, "end": 0.5},
+            {"type": "spacing", "text": " ", "start": 0.5, "end": 0.6},
+            {"type": "audio_event", "text": "(cough)", "start": 0.6, "end": 0.7},
+            {"type": "word", "text": "no-times"},
+            {"type": "word", "text": "there", "start": 0.75, "end": 1.0},
+        ]})
+        .to_string();
+        let words = parse_words(body.as_bytes()).unwrap();
+        assert_eq!(
+            words,
+            [
+                TimedWord {
+                    text: "Hello,".into(),
+                    start_ms: 250,
+                    end_ms: 500
+                },
+                TimedWord {
+                    text: "there".into(),
+                    start_ms: 750,
+                    end_ms: 1_000
+                },
+            ]
+        );
+        assert!(matches!(
+            parse_words(b"nope"),
+            Err(UploadError::Unreachable(_))
+        ));
+    }
+
+    #[test]
+    fn asking_for_words_changes_only_the_timing_field() {
+        let mut upload = request("https://example.test/", "en", 30);
+        upload.words = true;
+        let arguments = curl_arguments(&upload);
+        assert!(arguments.contains(&"timestamps_granularity=word".to_owned()));
+        assert!(!arguments.contains(&"diarize=true".to_owned()));
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.starts_with("file=@-;"))
+        );
     }
 
     #[test]
