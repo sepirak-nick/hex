@@ -41,6 +41,10 @@ const AGENTATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// A click just before the audio starts still belongs to this recording.
 const CLICK_LEAD_MS: u64 = 1_000;
 const NO_WORDS: &str = "(Pointed at this without saying anything.)";
+/// A silence this long ends a sentence Scribe didn't punctuate.
+const SENTENCE_PAUSE_MS: u64 = 1_500;
+/// A silence this long divides a sentence with several clicks in it.
+const CLAUSE_PAUSE_MS: u64 = 400;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static STARTED: AtomicBool = AtomicBool::new(false);
@@ -374,19 +378,16 @@ pub fn take_clicks(start_ms: u64) -> Vec<Click> {
     taken
 }
 
-/// The words nearest each click: a word belongs to the click its middle is
-/// closest to, so both "this button *click*" and "*click* this button" work.
+/// Divides what was said between the clicks, keeping sentences whole. A
+/// sentence goes to the click made while saying it, else to the nearest click,
+/// so both "this button *click*" and "*click* this button" work. Only a sentence
+/// with several clicks in it is divided: at its commas and pauses, then, for a
+/// clause that still has several, word by word.
 fn split_words(words: &[TimedWord], clicks: &[Click], start_ms: u64) -> Vec<String> {
     let mut notes = vec![Vec::new(); clicks.len()];
-    for word in words {
-        let middle = start_ms + (word.start_ms + word.end_ms) / 2;
-        let nearest = clicks
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, click)| click.timestamp.abs_diff(middle))
-            .map(|(index, _)| index);
-        if let Some(nearest) = nearest {
-            notes[nearest].push(word.text.as_str());
+    if !clicks.is_empty() {
+        for sentence in runs(words, ends_sentence, SENTENCE_PAUSE_MS) {
+            assign_run(sentence, clicks, start_ms, Level::Sentence, &mut notes);
         }
     }
     notes
@@ -399,6 +400,90 @@ fn split_words(words: &[TimedWord], clicks: &[Click], start_ms: u64) -> Vec<Stri
             }
         })
         .collect()
+}
+
+#[derive(Clone, Copy)]
+enum Level {
+    Sentence,
+    Clause,
+}
+
+fn assign_run<'a>(
+    run: &'a [TimedWord],
+    clicks: &[Click],
+    start_ms: u64,
+    level: Level,
+    notes: &mut [Vec<&'a str>],
+) {
+    let (Some(first), Some(last)) = (run.first(), run.last()) else {
+        return;
+    };
+    let (from, to) = (start_ms + first.start_ms, start_ms + last.end_ms);
+    let inside = clicks
+        .iter()
+        .filter(|click| (from..=to).contains(&click.timestamp))
+        .count();
+    if inside < 2 {
+        // The nearest click is the one inside when there is one. On a tie the
+        // earlier wins: people usually click first and keep talking.
+        let distance = |click: &Click| {
+            from.saturating_sub(click.timestamp)
+                .max(click.timestamp.saturating_sub(to))
+        };
+        if let Some((nearest, _)) = clicks
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, click)| distance(click))
+        {
+            notes[nearest].extend(run.iter().map(|word| word.text.as_str()));
+        }
+        return;
+    }
+    match level {
+        Level::Sentence => {
+            for clause in runs(run, ends_clause, CLAUSE_PAUSE_MS) {
+                assign_run(clause, clicks, start_ms, Level::Clause, notes);
+            }
+        }
+        Level::Clause => {
+            for word in run {
+                let middle = start_ms + (word.start_ms + word.end_ms) / 2;
+                if let Some((nearest, _)) = clicks
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, click)| click.timestamp.abs_diff(middle))
+                {
+                    notes[nearest].push(word.text.as_str());
+                }
+            }
+        }
+    }
+}
+
+/// Cuts `words` after each word `ends` accepts, and at each silence of `pause_ms`
+/// or more, since speech isn't always punctuated.
+fn runs(words: &[TimedWord], ends: fn(&str) -> bool, pause_ms: u64) -> Vec<&[TimedWord]> {
+    let mut runs = Vec::new();
+    let mut start = 0;
+    for (index, pair) in words.windows(2).enumerate() {
+        if ends(&pair[0].text) || pair[1].start_ms.saturating_sub(pair[0].end_ms) >= pause_ms {
+            runs.push(&words[start..=index]);
+            start = index + 1;
+        }
+    }
+    if start < words.len() {
+        runs.push(&words[start..]);
+    }
+    runs
+}
+
+fn ends_sentence(word: &str) -> bool {
+    word.trim_end_matches(['"', '\'', ')', '”', '’'])
+        .ends_with(['.', '!', '?', '…'])
+}
+
+fn ends_clause(word: &str) -> bool {
+    ends_sentence(word) || word.ends_with([',', ';', ':'])
 }
 
 /// Sends a finished recording: checks Agentation before spending an upload,
@@ -564,6 +649,108 @@ mod tests {
         let words = [word("before", 900, 1_000), word("after", 5_100, 5_200)];
         let clicks = [click(1_500, ".before"), click(4_000, ".after")];
         assert_eq!(split_words(&words, &clicks, 0), ["before", "after"]);
+    }
+
+    /// Words spoken one after another from `start_ms`, at 300 ms each.
+    fn spoken(start_ms: u64, sentence: &str) -> Vec<TimedWord> {
+        sentence
+            .split_whitespace()
+            .enumerate()
+            .map(|(index, text)| {
+                let at = start_ms + index as u64 * 300;
+                word(text, at, at + 280)
+            })
+            .collect()
+    }
+
+    /// The recording that cut "Talk and Fix Demo" in half. Its real clicks were
+    /// 5.3 s apart, with the midpoint between "Talk" and "and". Timings around
+    /// those are reconstructed, since Hex keeps no audio.
+    #[test]
+    fn a_sentence_running_past_the_midpoint_between_clicks_stays_whole() {
+        let mut words = spoken(0, "Testing dictation and being able to click around.");
+        words.extend(spoken(
+            2_500,
+            "Uh, change this header from Talk and Click Demo to Talk and Fix Demo.",
+        ));
+        words.extend(spoken(7_000, "Change this price to $5"));
+        let clicks = [click(3_300, "h1"), click(8_620, "p")];
+        // Word by word, the midpoint at 5.96 s fell inside the header sentence.
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            [
+                "Testing dictation and being able to click around. Uh, change this header \
+                 from Talk and Click Demo to Talk and Fix Demo.",
+                "Change this price to $5",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_click_at_the_end_of_its_sentence_gets_all_of_it() {
+        let mut words = spoken(0, "This price should be five.");
+        words.extend(spoken(1_600, "This heading should be blue."));
+        let clicks = [click(1_400, ".price"), click(3_000, ".heading")];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            ["This price should be five.", "This heading should be blue."]
+        );
+    }
+
+    #[test]
+    fn a_sentence_with_no_click_in_it_goes_to_the_nearest() {
+        let mut words = spoken(0, "First thing here.");
+        words.extend(spoken(3_000, "More about the first thing."));
+        words.extend(spoken(10_000, "Second thing here."));
+        let clicks = [click(500, ".first"), click(10_400, ".second")];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            [
+                "First thing here. More about the first thing.",
+                "Second thing here."
+            ]
+        );
+    }
+
+    #[test]
+    fn clicks_inside_one_sentence_divide_it_at_its_comma() {
+        let words = spoken(0, "This button is too big, and this heading is too small.");
+        let clicks = [click(600, ".button"), click(2_100, ".heading")];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            ["This button is too big,", "and this heading is too small."]
+        );
+    }
+
+    #[test]
+    fn clicks_inside_one_unbroken_clause_divide_it_by_word() {
+        let words = spoken(0, "this button and this heading");
+        let clicks = [click(150, ".button"), click(1_350, ".heading")];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            ["this button and", "this heading"]
+        );
+    }
+
+    #[test]
+    fn a_click_during_a_sentence_doesnt_take_the_next_one() {
+        let mut words = spoken(0, "Make this larger.");
+        words.extend(spoken(900, "Also make that smaller."));
+        let clicks = [click(400, ".this"), click(1_500, ".that")];
+        assert_eq!(
+            split_words(&words, &clicks, 0),
+            ["Make this larger.", "Also make that smaller."]
+        );
+    }
+
+    #[test]
+    fn closing_punctuation_still_ends_a_sentence() {
+        assert!(ends_sentence("done.\""));
+        assert!(ends_sentence("really?)"));
+        assert!(!ends_sentence("Dr"));
+        assert!(!ends_sentence("big,"));
+        assert!(ends_clause("big,"));
+        assert!(ends_clause("done."));
     }
 
     #[test]

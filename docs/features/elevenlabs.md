@@ -87,7 +87,8 @@ Labs > Talk and click (off)                // labs.talk_and_click; hex labs on t
     ├── It finishes with clicks -> nothing is pasted or kept in History
     │   ├── Agentation's server isn't running -> fails before any upload, naming the command to start it; the words are lost
     │   ├── Audio -> ElevenLabs with word timing, whichever model is selected, and with no local fallback
-    │   ├── Each word -> the click nearest its middle; a click with no words says so
+    │   ├── Each sentence -> the click made while saying it, else the nearest; a click with no words says so
+    │   │   └── Several clicks in one sentence -> divided at its commas and pauses, then by word
     │   └── One note per click -> Agentation's server on 4747, in the toolbar's session when the page has one
     └── Escape -> nothing is sent; its clicks are dropped by the next dictation
 ```
@@ -97,7 +98,8 @@ other `Host` headers and any `Origin` but `localhost`, `127.0.0.1`, `[::1]`,
 `*.localhost`, `*.local`, and `*.test`. Notes carry what the page sends, and an agent
 reads them, so only add the script to pages you trust. Selectors and React component
 names are this script's own, simpler than Agentation's; source files aren't captured.
-Word splitting is by time alone, so a sentence spanning two clicks can split awkwardly.
+A sentence is found by Scribe's punctuation or a 1.5 s pause, and goes to one click
+unless several fall inside it, so a remark about two things needs a click during each.
 
 Check: `talk_and_click.rs`; `live_a_real_page_click_becomes_an_agentation_note` drives
 `prototypes/talk-and-click-demo` with a browser and `HEX_LIVE_WAV`.
