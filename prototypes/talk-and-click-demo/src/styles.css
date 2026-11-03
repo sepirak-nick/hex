@@ -1,0 +1,26 @@
+.choose {
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 20px;
+  background: #2563eb;
+  color: #fff;
+  font: 600 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.choose:hover {
+  background: #1d4ed8;
+  box-shadow: 0 4px 10px rgb(37 99 235 / 35%);
+}
+
+.choose:active {
+  transform: translateY(1px);
+}
+
+.choose:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
